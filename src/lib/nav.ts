@@ -118,7 +118,7 @@ export const SECTIONS: Section[] = [
     key: 'forecast',
     label: 'Forecast',
     title: 'FORECAST',
-    blurb: 'Distribution · calibration · direction',
+    blurb: 'Distribution · calibration · direction · monthly',
     group: 'Model',
     icon: 'M3 12h4l3-8 4 16 3-8h4',
     // Ordered deliberately: `subs[0]` is where a first-time visitor lands, and
@@ -129,11 +129,13 @@ export const SECTIONS: Section[] = [
     // `weekly` keeps its slug though its label reads DIRECTION: it is the only
     // panel that takes a directional view, which the distribution page refuses
     // to do by construction. Renaming the slug would break old bookmarks for no
-    // gain. The MONTHLY tab was removed — see docs/DECISIONS.md §4.
+    // gain. MONTHLY came back as the stored, weekly worker run (appended, so the
+    // landing tab is unchanged) — see docs/DECISIONS.md §4.
     subs: [
       { slug: 'distribution', label: 'DISTRIBUTION' },
       { slug: 'calibration', label: 'CALIBRATION' },
       { slug: 'weekly', label: 'DIRECTION' },
+      { slug: 'monthly', label: 'MONTHLY' },
     ],
   },
   {

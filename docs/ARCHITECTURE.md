@@ -7,8 +7,10 @@ Python worker  ──service_role──▶  Supabase Postgres  ──anon read�
 (APScheduler)                     RLS: public read                   (Vercel)
 pandas / numpy                    service writes only                App Router, SSR
    │
-   └─ not built. The one table that exists today (`whale_events`) is written
-      by a Next.js route handler instead — see "The ingestion exception".
+   └─ first job built: `iris_worker.monthly` (weekly Monte Carlo, run by
+      GitHub Actions cron — not APScheduler, so there is no host to keep alive).
+      `whale_events` is still written by a Next.js route handler — see
+      "The ingestion exception".
 ```
 
 ## Why not Streamlit + SQLite
@@ -33,7 +35,7 @@ would guarantee drift between the two paths.
 
 | Process | Reads | Writes | Runs |
 |---|---|---|---|
-| `worker/` | upstream APIs | every data table, `data_source_status` | **not built yet** |
+| `worker/` | upstream APIs | `monthly_forecast_runs`, its `data_source_status` row | GitHub Actions, weekly (`.github/workflows/monthly-forecast.yml`) |
 | Next.js | every data table (anon) | `whale_events` only, via `/api/ingest/whale` | Vercel |
 
 ### The ingestion exception

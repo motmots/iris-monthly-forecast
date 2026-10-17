@@ -69,6 +69,7 @@ values
   ('internal_quant', 'Quant pipeline', 'quant', false, true, null),
   ('internal_forecast', 'Forecast pipeline', 'forecast', false, true, null),
   ('internal_distribution', 'Price distribution engine', 'forecast', false, true, null),
+  ('internal_monthly', 'Monthly Monte Carlo worker', 'forecast', false, true, 'Written weekly by the Python worker. Apply supabase/migrations/0003_monthly_forecast.sql, add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY as GitHub Actions secrets, then run the "Monthly forecast" workflow once by hand.'),
   ('alternative_me', 'Fear & Greed (alternative.me)', 'sentiment', false, true, null),
   ('fred', 'FRED', 'macro', true, true, 'Register a free FRED API key and set FRED_API_KEY in worker/.env.'),
   ('internal_macro_regime', 'Macro regime engine', 'macro', false, true, null),

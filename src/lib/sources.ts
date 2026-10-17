@@ -26,6 +26,7 @@ export const SOURCES: SourceDef[] = [
   { key: 'internal_quant', displayName: 'Quant pipeline', category: 'quant', requiresKey: false, enabled: true, unlockNote: null },
   { key: 'internal_forecast', displayName: 'Forecast pipeline', category: 'forecast', requiresKey: false, enabled: true, unlockNote: null },
   { key: 'internal_distribution', displayName: 'Price distribution engine', category: 'forecast', requiresKey: false, enabled: true, unlockNote: null },
+  { key: 'internal_monthly', displayName: 'Monthly Monte Carlo worker', category: 'forecast', requiresKey: false, enabled: true, unlockNote: 'Written weekly by the Python worker. Apply supabase/migrations/0003_monthly_forecast.sql, add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY as GitHub Actions secrets, then run the "Monthly forecast" workflow once by hand.' },
   { key: 'alternative_me', displayName: 'Fear & Greed (alternative.me)', category: 'sentiment', requiresKey: false, enabled: true, unlockNote: null },
   { key: 'fred', displayName: 'FRED', category: 'macro', requiresKey: true, enabled: true, unlockNote: 'Register a free FRED API key and set FRED_API_KEY in worker/.env.' },
   { key: 'internal_macro_regime', displayName: 'Macro regime engine', category: 'macro', requiresKey: false, enabled: true, unlockNote: null },

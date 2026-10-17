@@ -40,6 +40,10 @@ export const WIRED_SOURCES: readonly SourceKey[] = [
   ...BASE,
   ...(process.env.FRED_API_KEY ? (['fred'] as const) : []),
   ...(process.env.WHALE_ALERT_API_KEY ? (['whale_alert'] as const) : []),
+  // Database-backed: rows exist only once the worker has run, so Supabase being
+  // configured is the proxy, as the key is for whale_alert. A stalled schedule
+  // shows up as a stale `asOf` on the monthly page, not as a missing feed.
+  ...(process.env.NEXT_PUBLIC_SUPABASE_URL ? (['internal_monthly'] as const) : []),
 ];
 
 export const WIRED_SOURCE_COUNT = WIRED_SOURCES.length;

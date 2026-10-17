@@ -1,23 +1,8 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
-  async redirects() {
-    return [
-      {
-        // `/forecast/monthly` was removed: it answered the same 30-day question
-        // as the distribution page but inherited its window's drift, so the two
-        // disagreed. See docs/DECISIONS.md §4. Old bookmarks land on the page
-        // that replaced it, at the matching horizon.
-        //
-        // This lives here rather than as a `redirect()` stub page so the route
-        // folder is genuinely gone. Middleware cannot cover it — its matcher
-        // only sees single-segment section paths like `/forecast`.
-        source: "/forecast/monthly",
-        destination: "/forecast/distribution?h=1M",
-        permanent: true,
-      },
-    ];
-  },
-};
+// `/forecast/monthly` used to redirect to `/forecast/distribution?h=1M`. It is a
+// real route again (the stored weekly worker run, see docs/DECISIONS.md §4), so
+// the redirect is gone — a permanent redirect left here would shadow the page.
+const nextConfig: NextConfig = {};
 
 export default nextConfig;

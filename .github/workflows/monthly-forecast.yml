@@ -1,0 +1,63 @@
+name: Monthly forecast
+
+# Weekly Monte Carlo run. Monday 00:20 UTC (07:20 WIB): the Sunday daily candle
+# has closed, so the weekly as-of is a complete week. Minute 20 rather than 00
+# because GitHub delays jobs queued on the hour.
+#
+# NOTE: GitHub only fires `schedule` from the DEFAULT branch. On a feature
+# branch, run it with "Run workflow" (workflow_dispatch) until it is merged.
+on:
+  schedule:
+    - cron: "20 0 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Skip Supabase, only produce the JSON artifact"
+        type: boolean
+        default: false
+
+concurrency:
+  group: monthly-forecast
+  cancel-in-progress: false
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: worker/requirements.txt
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: Unit tests
+        run: python -m pytest -q tests
+
+      - name: Run forecast
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            python -m iris_worker.monthly --dry-run
+          else
+            python -m iris_worker.monthly
+          fi
+
+      - name: Keep the run as an artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monthly-forecast-${{ github.run_id }}
+          path: worker/out/*.json
+          if-no-files-found: ignore
+          retention-days: 90

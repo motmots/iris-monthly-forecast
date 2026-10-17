@@ -191,7 +191,59 @@ survives** — `/forecast/calibration` still scores it against FHS on the same o
 origins, via `simulate({ method: 'iid' })` in `src/lib/quant/fhs.ts`. The control is still run;
 it just no longer has a page presenting its output as a forecast. See §12.
 
-Old bookmarks are redirected to `/forecast/distribution?h=1M` from `next.config.ts`.
+Old bookmarks were redirected to `/forecast/distribution?h=1M` from `next.config.ts` until the
+page came back (below); the redirect is now removed.
+
+### Monthly forecast — REINSTATED as a stored worker run (2026-10)
+
+`/forecast/monthly` is back, and it does **not** reopen the contradiction above, because it is the
+same engine with the same choice on drift: FHS over GARCH(1,1)-standardised residuals, drift
+removed, median on spot. What differs is *where and when* it runs, not *what* it says:
+
+| | `/forecast/distribution` | `/forecast/monthly` |
+|---|---|---|
+| Computed | on request (TypeScript, cached 15 min) | weekly, Monday 00:20 UTC (Python worker, GitHub Actions) |
+| Stored | no | one row per run in `monthly_forecast_runs` |
+| Paths | 4,000, quantiles only | 10,000; 24 representative paths kept for the line chart |
+| Resolution | six horizons, 1W–1Y | every day, D+1 … D+30 |
+| Evaluated | `/forecast/calibration`, on demand | backtest stored with the run **and** a live track record: each run re-scores earlier runs against realised closes |
+
+Storing the runs is the point. A forecast regenerated on every page load can never be checked
+against what happened afterwards; a stored one is checked automatically, by the next run.
+
+**Why there is no ML model behind it.** XGBoost quantile regression (Q10/Q50/Q90 of the 30-day log
+return, features: price lags, technicals, FRED macro, on-chain; 5-fold expanding walk-forward on
+`btc_master_2`) was evaluated first. Pinball loss, mean over folds:
+
+| Model | Pinball | Fold coverage of P10–P90 |
+|---|---|---|
+| XGB, price + calendar features | 0.053 | 68–92% |
+| XGB, + technicals | 0.050 | 63–91% |
+| XGB, stationary features + 30-day purge | 0.048 | 57–95% |
+| Constant historical quantiles (no features) | **0.045** | 75–91% |
+| Volatility-scaled, median 0 | 0.048 | **73–84%** |
+
+No feature set beat the constant baseline, and the XGB median called the 30-day direction right
+48% of the time against 54% for "always up". The price-level features were part of it (trees cannot
+extrapolate, and one test fold sat entirely above the training range), but the stationary rebuild
+did not close the gap either. Volatility is forecastable at this horizon; direction was not.
+Reproduce with `worker/research/benchmark_xgb_vs_baselines.py`.
+
+**What the worker's own backtest says** (2015-03 → 2026-08 daily closes, 385 weekly origins from
+2019, GARCH re-fitted yearly on an expanding window):
+
+| Horizon | FHS P10–P90 coverage | FHS pinball | i.i.d. pinball | GARCH-Normal pinball |
+|---|---|---|---|---|
+| 7d | 83.4% | 0.0192 | 0.0193 | 0.0194 |
+| 14d | 79.7% | 0.0283 | 0.0283 | 0.0285 |
+| 30d | 76.4% | 0.0430 | **0.0424** | 0.0429 |
+
+At 30 days FHS is slightly **too narrow** (76% against 80%), and the miss is concentrated in the
+2019–2021 bull years (57–71% coverage by year) with the PIT histogram heavy in its top bin —
+realised returns overshooting the upper band. That is the cost of removing drift: in a strong
+trend, a zero-drift cone is centred too low. It is kept anyway, for the reason this section
+started with — a drift estimate decided by the lookback window is worse than none — but the
+page publishes the by-year coverage so the weakness is visible rather than averaged away.
 
 ### The WEEKLY tab is now DIRECTION
 

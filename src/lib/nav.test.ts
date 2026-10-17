@@ -58,8 +58,12 @@ describe('forecast section', () => {
     expect(defaultSubHref(forecast)).toBe('/forecast/distribution');
   });
 
-  it('no longer offers the removed monthly tab', () => {
-    expect(forecast.subs.map((s) => s.slug)).not.toContain('monthly');
+  it('offers the monthly worker tab without moving the landing tab', () => {
+    // MONTHLY was re-added as the stored weekly worker run. It is appended, so
+    // `subs[0]` (where a first-time visitor lands) is still distribution.
+    const slugs = forecast.subs.map((s) => s.slug);
+    expect(slugs).toContain('monthly');
+    expect(slugs.at(-1)).toBe('monthly');
   });
 
   it('keeps the weekly slug behind the DIRECTION label', () => {
