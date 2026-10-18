@@ -10,7 +10,9 @@ Python jobs that run outside the web app and write to Supabase. The Next.js app 
 | Model | GARCH(1,1), variance-targeted, grid-search MLE (EWMA fallback). Port of `src/lib/quant/garch.ts`. |
 | Simulation | Filtered Historical Simulation, 10,000 paths, 30 daily steps, drift removed. Port of `src/lib/quant/fhs.ts`. |
 | Output | P5/P10/P25/P50/P75/P90/P95 for every day D+0…D+30, 24 representative paths, probability ladder. |
-| Backtest | Rolling-origin out-of-sample (weekly origins since 2019, yearly refits): coverage, pinball, PIT for FHS vs i.i.d. vs GARCH-Normal. |
+| Backtest | Rolling-origin out-of-sample (weekly origins, yearly refits, everything at origin *t* from data before *t*): coverage, pinball, PIT, upside/downside misses for FHS vs FHS+conformal vs i.i.d. vs GARCH-Normal, all on the same origins. |
+| Calibration | Split-conformal band rescaling, learned only from outcomes realised before each origin. Evaluated and **off by default** — it raised pinball loss at every horizon. `--calibrate` opts in. |
+| Leakage test | `test_backtest_has_no_lookahead` rewrites the future and requires past origins to score identically. |
 | Track record | Each run re-scores the previous 12 runs against realised closes (`realized` column). |
 | Storage | One row per as-of date in `public.monthly_forecast_runs` (upsert, so reruns are safe). |
 
@@ -32,7 +34,7 @@ export SUPABASE_SERVICE_ROLE_KEY=...      # service role, NOT the anon key
 python -m iris_worker.monthly
 ```
 
-Flags: `--horizon 30`, `--paths 10000`, `--lines 24`, `--no-backtest`, `--backtest-paths 1000`, `--out out`.
+Flags: `--horizon 30`, `--paths 10000`, `--lines 24`, `--no-backtest`, `--backtest-paths 1000`, `--calibrate`, `--out out`.
 
 ### Deploy (one-time)
 

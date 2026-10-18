@@ -129,3 +129,25 @@ def simulate(
     sigma_path = np.sqrt(np.maximum(lr + pers ** (h - 1) * (s0**2 - lr), 1e-16))
 
     return Simulation(bands, np.asarray(quantiles), cum, method, drift_mode, drift, fit, s0, sigma_path)
+
+
+def recalibrate(sim: Simulation, k_up, k_down) -> Simulation:
+    """Rescale every path around each step's median, per side, in log space.
+
+    ``k_up[s-1]`` / ``k_down[s-1]`` apply at step ``s``. The map is monotone, so
+    path ranks — and therefore the median, the representative paths and every
+    quantile's identity — are preserved; only distances from the median change.
+    Factors come from ``backtest.run_backtest(...)["calibration"]``.
+    """
+    ku = np.asarray(k_up, dtype=float)
+    kd = np.asarray(k_down, dtype=float)
+    if len(ku) < sim.horizon or len(kd) < sim.horizon:
+        raise ValueError("need one calibration factor per step")
+    cum = sim.cum.copy()
+    for s in range(1, sim.horizon + 1):
+        med = np.median(cum[s])
+        c = cum[s]
+        cum[s] = np.where(c > med, med + ku[s - 1] * (c - med), med - kd[s - 1] * (med - c))
+    bands = np.exp(np.quantile(cum, sim.quantiles, axis=1).T)
+    return Simulation(bands, sim.quantiles, cum, sim.method, sim.drift_mode, sim.drift_removed,
+                      sim.fit, sim.start_sigma, sim.sigma_path)

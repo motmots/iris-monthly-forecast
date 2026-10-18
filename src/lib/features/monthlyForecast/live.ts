@@ -65,6 +65,11 @@ function toModel(m: Record<string, unknown>): MonthlyForecastData['model'] {
     driftRemovedDaily: num(m.drift_removed_daily),
     expectedMovePct: num(m.expected_move_pct),
     rangeP5P95Pct: num(m.range_p5_p95_pct),
+    calibrationApplied: Boolean((m.calibration as Record<string, unknown> | undefined)?.applied),
+    calibrationNote: (() => {
+      const c = m.calibration as Record<string, unknown> | undefined;
+      return typeof c?.reason === 'string' ? c.reason : null;
+    })(),
     probabilities: probs.map(
       (p): ProbabilityRow => ({
         label: String(p.label),
@@ -77,21 +82,36 @@ function toModel(m: Record<string, unknown>): MonthlyForecastData['model'] {
 
 function toBacktest(b: Record<string, unknown> | null): MonthlyBacktest | null {
   if (!b || !Array.isArray(b.horizons)) return null;
-  const byYear = Array.isArray(b.fhs_coverage80_by_year_h30)
-    ? (b.fhs_coverage80_by_year_h30 as Record<string, unknown>[])
-    : [];
+  const years = (v: unknown) =>
+    (Array.isArray(v) ? (v as Record<string, unknown>[]) : []).map((y) => ({
+      year: String(y.year),
+      coverage: num(y.coverage),
+      origins: num(y.origins),
+    }));
+  const horizons = (b.horizons as Record<string, unknown>[]).map((h) => ({
+    h: num(h.h),
+    origins: num(h.origins),
+    independent: num(h.independent),
+    methods: (Array.isArray(h.methods) ? (h.methods as Record<string, unknown>[]) : []).map((m) => ({
+      method: m.method as BacktestHorizon['methods'][number]['method'],
+      label: String(m.label ?? m.method),
+      coverage: m.coverage as BacktestHorizon['methods'][number]['coverage'],
+      pinball: num(m.pinball),
+      pit: Array.isArray(m.pit) ? (m.pit as number[]) : [],
+      upperMiss: numOrNull(m.upper_miss),
+      lowerMiss: numOrNull(m.lower_miss),
+    })),
+  }));
   return {
     origins: num(b.origins),
+    warmupOrigins: num(b.warmup_origins),
     firstOrigin: String(b.first_origin ?? ''),
     lastOrigin: String(b.last_origin ?? ''),
     stepDays: num(b.step_days, 7),
     refitEveryDays: num(b.refit_every_days, 365),
-    horizons: b.horizons as BacktestHorizon[],
-    byYear: byYear.map((y) => ({
-      year: String(y.year),
-      coverage: num(y.coverage),
-      origins: num(y.origins),
-    })),
+    horizons,
+    byYear: years(b.fhs_coverage80_by_year_h30),
+    byYearCal: years(b.fhs_cal_coverage80_by_year_h30),
   };
 }
 

@@ -40,6 +40,12 @@ export function MonthlyModelPanel({ fc }: { fc: Envelope<MonthlyForecastData> })
       <KeyValueRow label="EXPECTED MOVE" value={`±${m.expectedMovePct.toFixed(1)}%`} sub="half the P25–P75 span at D+30" />
       <KeyValueRow label="P5–P95 SPAN" value={`${m.rangeP5P95Pct.toFixed(1)}%`} tone="mut" sub="of spot, at D+30" />
       <KeyValueRow
+        label="CALIBRATION"
+        value={m.calibrationApplied ? 'CONFORMAL' : 'RAW FHS'}
+        tone={m.calibrationApplied ? 'amber' : 'mut'}
+        sub={m.calibrationApplied ? 'bands rescaled from backtest' : m.calibrationNote ?? 'not applied'}
+      />
+      <KeyValueRow
         label="DRIFT"
         value="REMOVED"
         tone="blue"

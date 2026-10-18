@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from iris_worker.backtest import run_backtest
-from iris_worker.fhs import simulate
+from iris_worker.backtest import conformal_k, run_backtest
+from iris_worker.fhs import recalibrate, simulate
 from iris_worker.garch import fit_garch11, forecast_sigma_path
 from iris_worker.monthly import build_run
 from iris_worker.prices import Series
@@ -101,3 +101,63 @@ def test_build_run_shape():
     assert len(run["history"]) == 60
     assert run["realized"]["days_observed"] == 0
     assert run["model"]["probabilities"][3]["label"] == "0%"
+
+
+def test_backtest_has_no_lookahead():
+    """Rewrite everything after `cut`: no origin whose outcome ends by `cut` may move.
+
+    Covers every input an origin uses — GARCH fit, volatility state, residual
+    pool, removed drift and, the easy one to get wrong, the walk-forward
+    calibration factors (which must use only outcomes realised before the origin).
+    """
+    r = garch_series(n=2000, seed=21)
+    dates = [str(np.datetime64("2018-01-01") + np.timedelta64(i, "D")) for i in range(len(r))]
+    kw = dict(horizons=(7, 14), train_min_days=900, step_days=7, n_paths=300, min_cal_origins=20,
+              return_records=True)
+    cut = 1700
+    a = run_backtest(r, dates, **kw)
+
+    r2 = r.copy()
+    rng = np.random.default_rng(99)
+    r2[cut:] = rng.standard_normal(len(r) - cut) * 0.08 + 0.01   # a wildly different future
+    b = run_backtest(r2, dates, **kw)
+
+    rec_b = {x["t"]: x for x in b["records"]}
+    checked = 0
+    for x in a["records"]:
+        if x["t"] + 14 <= cut:
+            assert x["scores"] == rec_b[x["t"]]["scores"], f"origin {x['t']} saw the future"
+            checked += 1
+    assert checked > 20
+    # ...and the test is not vacuous: later origins do change.
+    assert any(x["scores"] != rec_b[x["t"]]["scores"] for x in a["records"] if x["t"] >= cut)
+
+
+def test_conformal_k_hits_target_tail():
+    rng = np.random.default_rng(3)
+    ratios = rng.standard_normal(5000) * 1.3
+    k = conformal_k(ratios, tail=0.10)
+    assert abs((ratios > k).mean() - 0.10) < 0.01
+
+
+def test_calibration_widens_bands_that_are_too_narrow():
+    # Trending data: zero-drift bands miss on the upside; calibration must fix most of it.
+    r = garch_series(n=2600, seed=4, drift=0.004)
+    dates = [str(np.datetime64("2018-01-01") + np.timedelta64(i, "D")) for i in range(len(r))]
+    bt = run_backtest(r, dates, horizons=(14,), train_min_days=1000, step_days=5, n_paths=500)
+    m = {x["method"]: x for x in bt["horizons"][0]["methods"]}
+    raw, cal = m["fhs"]["coverage"]["80"], m["fhs_cal"]["coverage"]["80"]
+    assert abs(cal - 0.80) < abs(raw - 0.80)
+    assert m["fhs_cal"]["upper_miss"] < m["fhs"]["upper_miss"]
+    assert bt["calibration"]["k_up"][13] > 1.0
+
+
+def test_recalibrate_keeps_median_and_order():
+    sim = simulate(garch_series(), 10, 3000, seed=8)
+    cal = recalibrate(sim, [1.5] * 10, [0.8] * 10)
+    # even path count: the median averages two middle paths, so allow float-level drift
+    np.testing.assert_allclose(cal.bands[:, 3], sim.bands[:, 3], rtol=1e-4)
+    assert np.all(np.argsort(cal.cum[-1]) == np.argsort(sim.cum[-1]))
+    up_raw = np.log(sim.bands[-1, 5] / sim.bands[-1, 3])
+    up_cal = np.log(cal.bands[-1, 5] / cal.bands[-1, 3])
+    assert up_cal == pytest.approx(1.5 * up_raw, rel=1e-3)

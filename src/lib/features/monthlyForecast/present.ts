@@ -9,6 +9,9 @@ export const WORKER_NOTE =
 export const BACKTEST_NOTE =
   'Rolling-origin and out of sample: at every weekly origin the model saw only earlier data, GARCH was re-fitted yearly on an expanding window. Overlapping windows are not independent — the INDEP. column is the honest sample size.';
 
+export const CALIBRATION_NOTE =
+  'FHS + CAL rescales the bands per side with split-conformal factors learned only from origins whose outcome had already happened (t′ + h ≤ t). It pulls coverage toward 80% in some years but raised pinball loss at every horizon, so the published bands are raw FHS. Early origins are a warm-up for that calibration and are excluded for every engine, so all rows are scored on the same dates.';
+
 export const WHY_NOT_ML_NOTE =
   'Why no ML model here: XGBoost quantile models on price, technical, macro and on-chain features did not beat a constant historical-quantile baseline on pinball loss in walk-forward tests, and their median got the 30-day direction right less often than “always up”. Volatility is forecastable; direction at this horizon was not. See worker/research/.';
 
@@ -48,6 +51,7 @@ export const bestByPinball = (methods: BacktestMethod[]) =>
 
 export const methodShort: Record<BacktestMethod['method'], string> = {
   fhs: 'FHS',
+  fhs_cal: 'FHS + CAL',
   iid: 'IID',
   garch_normal: 'GARCH-N',
 };

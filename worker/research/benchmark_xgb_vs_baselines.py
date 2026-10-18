@@ -17,6 +17,13 @@ Findings on btc_master_2 (2018-02 .. 2026-08), mean over folds:
   XGB with stationary features + purge also fails to beat the baselines,
   so the gap is not only a bug: the 30-day *direction* is not predictable
   from these features, while the *width* (volatility) is.
+
+Leakage note: the two "(asli)" rows deliberately reproduce the original
+baseline_v2 script, which has two leaks — no purge gap (the last 30 training
+rows' targets overlap the test window) and redundant-feature selection computed
+on the full dataset including test rows. Both flatter the XGB models, so their
+loss to the baselines is if anything understated. The "+ purge" rows remove the
+first leak; the stationary-feature row also avoids price-level features.
 """
 import sys
 

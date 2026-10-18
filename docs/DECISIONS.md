@@ -229,21 +229,35 @@ extrapolate, and one test fold sat entirely above the training range), but the s
 did not close the gap either. Volatility is forecastable at this horizon; direction was not.
 Reproduce with `worker/research/benchmark_xgb_vs_baselines.py`.
 
-**What the worker's own backtest says** (2015-03 → 2026-08 daily closes, 385 weekly origins from
-2019, GARCH re-fitted yearly on an expanding window):
+**What the worker's own backtest says** (2015-03 → 2026-08 daily closes, weekly origins, GARCH
+re-fitted yearly on an expanding window, everything at origin *t* built from `r[:t]` only). Scored
+on the 329 origins from 2020-04 onward — the first 56 are a warm-up for the calibration below, and
+are dropped for **every** engine so all rows are compared on the same dates:
 
-| Horizon | FHS P10–P90 coverage | FHS pinball | i.i.d. pinball | GARCH-Normal pinball |
-|---|---|---|---|---|
-| 7d | 83.4% | 0.0192 | 0.0193 | 0.0194 |
-| 14d | 79.7% | 0.0283 | 0.0283 | 0.0285 |
-| 30d | 76.4% | 0.0430 | **0.0424** | 0.0429 |
+| Horizon | FHS P10–P90 coverage | FHS pinball | FHS + CAL pinball | i.i.d. pinball | GARCH-Normal pinball |
+|---|---|---|---|---|---|
+| 7d | 85.4% | **0.0178** | 0.0182 | 0.0181 | 0.0180 |
+| 14d | 82.7% | **0.0262** | 0.0273 | 0.0267 | 0.0264 |
+| 30d | 79.0% | **0.0404** | 0.0414 | 0.0405 | **0.0404** |
 
-At 30 days FHS is slightly **too narrow** (76% against 80%), and the miss is concentrated in the
-2019–2021 bull years (57–71% coverage by year) with the PIT histogram heavy in its top bin —
-realised returns overshooting the upper band. That is the cost of removing drift: in a strong
-trend, a zero-drift cone is centred too low. It is kept anyway, for the reason this section
-started with — a drift estimate decided by the lookback window is worse than none — but the
-page publishes the by-year coverage so the weakness is visible rather than averaged away.
+Raw FHS is best or tied at every horizon. Its misses lean upward (30d: 13.7% of outcomes above
+P90 against 7.3% below P10) and cluster in the 2020–2021 bull run (57% and 71% coverage by year) —
+the cost of removing drift: in a strong trend a zero-drift cone is centred too low. It is kept for
+the reason this section started with: a drift estimate decided by the lookback is worse than none.
+The page publishes coverage by year so the weakness is visible rather than averaged away.
+
+**Recalibration was tried and rejected.** Asymmetric split-conformal scaling of the bands
+(`worker/iris_worker/backtest.py`), with factors learned walk-forward only from origins whose
+outcome had already happened (`t' + h <= t` — `t' < t` alone would let a 30-day outcome that ends
+after `t` leak in). It fixed the upside skew and lifted 2020–21 coverage to 81–85%, but over-widened
+the calm years: 30-day coverage 86.6% and pinball **up** at every horizon. Rolling 52/104/156-origin
+windows and a symmetric variant also raised pinball everywhere. The reported variant is the one
+specified before seeing results; choosing the best-scoring variant on these origins would leak the
+test set into the choice. Published bands are raw FHS; `--calibrate` opts in.
+
+**Leakage is tested, not asserted.** `test_backtest_has_no_lookahead` rewrites every return after a
+cut-off and requires every origin whose outcome ends before it to score identically — covering the
+GARCH fit, volatility state, residual pool, removed drift and the calibration factors.
 
 ### The WEEKLY tab is now DIRECTION
 

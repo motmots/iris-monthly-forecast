@@ -3,6 +3,7 @@ import type { Envelope } from '@/lib/envelope';
 import type { MonthlyForecastData } from '@/lib/features/monthlyForecast';
 import {
   BACKTEST_NOTE,
+  CALIBRATION_NOTE,
   WHY_NOT_ML_NOTE,
   bestByPinball,
   coverageTone,
@@ -19,12 +20,13 @@ const note = { margin: 0, fontFamily: 'var(--mono)', fontSize: 8.5, lineHeight: 
  */
 export function BacktestPanel({ fc }: { fc: Envelope<MonthlyForecastData> }) {
   const bt = fc.data.backtest;
+  const shipped = fc.data.model.calibrationApplied ? 'fhs_cal' : 'fhs';
 
   return (
     <Panel>
       <PanelHeader
         title="OUT-OF-SAMPLE BACKTEST"
-        note={bt ? `${bt.origins} weekly origins · ${bt.firstOrigin} → ${bt.lastOrigin}` : 'not run'}
+        note={bt ? `${bt.origins} weekly origins · ${bt.firstOrigin} → ${bt.lastOrigin} · ${bt.warmupOrigins} warm-up excluded` : 'not run'}
         right={<MockBadge env={fc} />}
       />
 
@@ -50,7 +52,10 @@ export function BacktestPanel({ fc }: { fc: Envelope<MonthlyForecastData> }) {
                     <td style={{ whiteSpace: 'nowrap', color: i === 0 ? 'var(--txt)' : 'transparent' }}>{h.h}D</td>
                     <td style={{ whiteSpace: 'nowrap' }}>
                       {methodShort[m.method]}
-                      {m.method === 'fhs' ? <span style={{ color: 'var(--dim)' }}> · shipped</span> : null}
+                      {m.method === shipped ? <span style={{ color: 'var(--dim)' }}> · shipped</span> : null}
+                      {m.method === 'fhs_cal' && shipped !== 'fhs_cal' ? (
+                        <span style={{ color: 'var(--dim)' }}> · not shipped</span>
+                      ) : null}
                     </td>
                     {(['50', '80', '90'] as const).map((k) => (
                       <td key={k} style={{ textAlign: 'right', color: toneVar(coverageTone(m.coverage[k], Number(k))) }}>
@@ -68,23 +73,28 @@ export function BacktestPanel({ fc }: { fc: Envelope<MonthlyForecastData> }) {
             </tbody>
           </DataTable>
 
-          {bt.byYear.length ? (
-            <div style={{ padding: '10px 12px 0' }}>
-              <div style={{ fontFamily: 'var(--mono)', fontSize: 8.5, letterSpacing: '.14em', color: 'var(--mut)', marginBottom: 6 }}>
-                FHS P10–P90 COVERAGE AT 30D, BY YEAR (TARGET 80%)
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${bt.byYear.length}, minmax(0, 1fr))`, gap: 1, background: 'var(--line)' }}>
-                {bt.byYear.map((y) => (
-                  <div key={y.year} style={{ background: 'var(--panel)', padding: '6px 4px', textAlign: 'center' }}>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--dim)' }}>{y.year}</div>
-                    <div style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, color: toneVar(coverageTone(y.coverage, 80)) }}>
-                      {(y.coverage * 100).toFixed(0)}%
+          {[
+            { label: 'FHS', rows: bt.byYear },
+            { label: 'FHS + CAL', rows: bt.byYearCal },
+          ].map(({ label, rows }) =>
+            rows.length ? (
+              <div key={label} style={{ padding: '10px 12px 0' }}>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 8.5, letterSpacing: '.14em', color: 'var(--mut)', marginBottom: 6 }}>
+                  {label} · P10–P90 COVERAGE AT 30D, BY YEAR (TARGET 80%)
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${rows.length}, minmax(0, 1fr))`, gap: 1, background: 'var(--line)' }}>
+                  {rows.map((y) => (
+                    <div key={y.year} style={{ background: 'var(--panel)', padding: '6px 4px', textAlign: 'center' }}>
+                      <div style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--dim)' }}>{y.year}</div>
+                      <div style={{ fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, color: toneVar(coverageTone(y.coverage, 80)) }}>
+                        {(y.coverage * 100).toFixed(0)}%
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          ) : null}
+            ) : null,
+          )}
         </>
       ) : (
         <div style={{ padding: 16, ...note }}>The latest run skipped the backtest (--no-backtest).</div>
@@ -92,6 +102,7 @@ export function BacktestPanel({ fc }: { fc: Envelope<MonthlyForecastData> }) {
 
       <div style={{ padding: '10px 12px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <p style={note}>{BACKTEST_NOTE}</p>
+        <p style={note}>{CALIBRATION_NOTE}</p>
         <p style={note}>{WHY_NOT_ML_NOTE}</p>
       </div>
       <SourceFootnote env={fc} />

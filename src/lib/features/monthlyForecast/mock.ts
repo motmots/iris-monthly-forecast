@@ -66,12 +66,14 @@ export function mockMonthlyForecast({ trackRecordRuns = 8 }: MonthlyForecastArgs
     h,
     origins: 385,
     independent: Math.floor((385 * 7) / h),
-    methods: (['fhs', 'iid', 'garch_normal'] as const).map((method) => ({
+    methods: (['fhs', 'fhs_cal', 'iid', 'garch_normal'] as const).map((method) => ({
       method,
-      label: method === 'fhs' ? 'FHS · GARCH-filtered bootstrap' : method === 'iid' ? 'i.i.d. bootstrap' : 'GARCH + Normal (closed form)',
+      label: method,
       coverage: { '50': 0.5 + r() * 0.1, '80': 0.76 + r() * 0.08, '90': 0.86 + r() * 0.07 },
       pinball: 0.006 * Math.sqrt(h) + r() * 0.001,
       pit: Array.from({ length: 10 }, () => 30 + Math.floor(r() * 20)),
+      upperMiss: 0.08 + r() * 0.05,
+      lowerMiss: 0.06 + r() * 0.04,
     })),
   }));
 
@@ -120,6 +122,8 @@ export function mockMonthlyForecast({ trackRecordRuns = 8 }: MonthlyForecastArgs
       driftRemovedDaily: 0.0013,
       expectedMovePct: ((end.p75 - end.p25) / 2 / spot) * 100,
       rangeP5P95Pct: ((end.p95 - end.p5) / spot) * 100,
+      calibrationApplied: false,
+      calibrationNote: 'evaluated out of sample and rejected: higher pinball loss than raw FHS',
       probabilities: [-30, -20, -10, 0, 10, 20, 30].map((pct) => {
         const z = Math.log(1 + pct / 100) / (sigma * Math.sqrt(horizon));
         // Normal survival via the Abramowitz–Stegun erf approximation.
@@ -131,15 +135,21 @@ export function mockMonthlyForecast({ trackRecordRuns = 8 }: MonthlyForecastArgs
       }),
     },
     backtest: {
-      origins: 385,
-      firstOrigin: '2019-03-08',
+      origins: 329,
+      warmupOrigins: 56,
+      firstOrigin: '2020-04-02',
       lastOrigin: '2026-07-17',
       stepDays: 7,
       refitEveryDays: 365,
       horizons,
-      byYear: ['2019', '2020', '2021', '2022', '2023', '2024', '2025'].map((year) => ({
+      byYear: ['2020', '2021', '2022', '2023', '2024', '2025'].map((year) => ({
         year,
         coverage: 0.6 + r() * 0.35,
+        origins: 52,
+      })),
+      byYearCal: ['2020', '2021', '2022', '2023', '2024', '2025'].map((year) => ({
+        year,
+        coverage: 0.7 + r() * 0.25,
         origins: 52,
       })),
     },

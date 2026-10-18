@@ -45,16 +45,22 @@ export interface MonthlyModelState {
   /** P5–P95 span at the horizon, % of spot. */
   rangeP5P95Pct: number;
   probabilities: ProbabilityRow[];
+  /** Whether conformal recalibration was applied to the published bands. */
+  calibrationApplied: boolean;
+  calibrationNote: string | null;
 }
 
 export interface BacktestMethod {
-  method: 'fhs' | 'iid' | 'garch_normal';
+  method: 'fhs' | 'fhs_cal' | 'iid' | 'garch_normal';
   label: string;
   /** Empirical coverage of the central 50 / 80 / 90 % bands, 0–1. */
   coverage: { '50': number; '80': number; '90': number };
   pinball: number;
   /** 10-bin PIT histogram counts. */
   pit: number[];
+  /** Share of outcomes above P90 / below P10. */
+  upperMiss: number | null;
+  lowerMiss: number | null;
 }
 
 export interface BacktestHorizon {
@@ -67,12 +73,16 @@ export interface BacktestHorizon {
 
 export interface MonthlyBacktest {
   origins: number;
+  /** Early origins excluded so every engine is scored on the same set. */
+  warmupOrigins: number;
   firstOrigin: string;
   lastOrigin: string;
   stepDays: number;
   refitEveryDays: number;
   horizons: BacktestHorizon[];
   byYear: { year: string; coverage: number; origins: number }[];
+  /** Same, for the recalibrated variant that was evaluated but not shipped. */
+  byYearCal: { year: string; coverage: number; origins: number }[];
 }
 
 /** One earlier run scored against what price actually did. */

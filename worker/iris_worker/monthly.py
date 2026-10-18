@@ -26,7 +26,7 @@ import numpy as np
 
 from . import __version__
 from .backtest import run_backtest
-from .fhs import DEFAULT_QUANTILES, simulate
+from .fhs import recalibrate, simulate
 from .prices import load_daily
 from .supabase_rest import Supabase
 from .tracking import score_run
@@ -46,13 +46,34 @@ def _r(x: float, nd: int = 2) -> float:
 
 
 def build_run(series, horizon: int, n_paths: int, backtest: bool, backtest_paths: int,
-              history_days: int, n_lines: int) -> dict:
+              history_days: int, n_lines: int, calibrate: bool = False) -> dict:
     closes = np.asarray(series.closes, dtype=float)
     log_ret = np.diff(np.log(closes))
     as_of = series.dates[-1]
     spot = float(closes[-1])
 
-    sim = simulate(log_ret, horizon, n_paths, seed=_seed(as_of), method="fhs", drift_mode="zero")
+    raw = simulate(log_ret, horizon, n_paths, seed=_seed(as_of), method="fhs", drift_mode="zero")
+
+    # Backtest first: it supplies the calibration factors. Every origin in it has
+    # its outcome inside the history (t + h <= last close), so using all of them
+    # here is still strictly out-of-sample for today's forecast.
+    bt = None
+    if backtest:
+        t0 = time.time()
+        bt = run_backtest(log_ret, series.dates[1:], horizons=tuple(sorted({7, 14, horizon})),
+                          n_paths=backtest_paths)
+        bt["seconds"] = round(time.time() - t0, 1)
+
+    cal = (bt or {}).get("calibration")
+    if calibrate and cal:
+        sim = recalibrate(raw, cal["k_up"][:horizon], cal["k_down"][:horizon])
+        calibration = {"applied": True, "k_up": cal["k_up"][:horizon], "k_down": cal["k_down"][:horizon],
+                       "method": cal["method"], "n_origins": cal["n_origins"]}
+    else:
+        sim = raw
+        calibration = {"applied": False,
+                       "reason": "evaluated out of sample and rejected: higher pinball loss than raw FHS"
+                       if cal else "no backtest in this run"}
 
     d0 = date.fromisoformat(as_of)
     bands = []
@@ -82,14 +103,10 @@ def build_run(series, horizon: int, n_paths: int, backtest: bool, backtest_paths
         "range_p5_p95_pct": float((last[6] - last[0]) * 100),
         "probabilities": probs,
         "sigma_path_ann_pct": [ann(s) for s in sim.sigma_path],
+        "calibration": calibration,
+        # Uncalibrated D+horizon band (equals the published one unless --calibrate).
+        "raw_end": {k: _r(m * spot) for k, m in zip(QKEYS, raw.bands[horizon])},
     }
-
-    bt = None
-    if backtest:
-        t0 = time.time()
-        bt = run_backtest(log_ret, series.dates[1:], horizons=(7, 14, horizon),
-                          n_paths=backtest_paths)
-        bt["seconds"] = round(time.time() - t0, 1)
 
     return {
         "id": as_of,
@@ -98,7 +115,7 @@ def build_run(series, horizon: int, n_paths: int, backtest: bool, backtest_paths
         "spot": _r(spot),
         "horizon_days": horizon,
         "n_paths": n_paths,
-        "method": sim.method,
+        "method": "fhs_cal" if calibration["applied"] else sim.method,
         "drift_mode": sim.drift_mode,
         "price_source": series.source.split(":")[0],
         "sample_days": int(len(log_ret)),
@@ -133,6 +150,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--history-days", type=int, default=120)
     ap.add_argument("--no-backtest", action="store_true")
     ap.add_argument("--backtest-paths", type=int, default=1000)
+    ap.add_argument("--calibrate", action="store_true",
+                    help="publish conformally rescaled bands. Off by default: in the leakage-free "
+                         "backtest it raised pinball loss at every horizon (docs/DECISIONS.md §4)")
     ap.add_argument("--dry-run", action="store_true", help="do not touch Supabase")
     ap.add_argument("--out", default="out")
     args = ap.parse_args(argv)
@@ -147,13 +167,18 @@ def main(argv: list[str] | None = None) -> int:
         series = load_daily(args.csv)
         print(f"[monthly] {len(series)} closes {series.dates[0]} -> {series.dates[-1]} via {series.source}")
         run = build_run(series, args.horizon, args.paths, not args.no_backtest,
-                        args.backtest_paths, args.history_days, args.lines)
+                        args.backtest_paths, args.history_days, args.lines,
+                        calibrate=args.calibrate)
 
         os.makedirs(args.out, exist_ok=True)
         path = os.path.join(args.out, f"monthly_forecast_{run['as_of']}.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(run, f, indent=1)
         end = run["bands"][-1]
+        c = run["model"]["calibration"]
+        if c["applied"]:
+            print(f"[monthly] calibration k_up {c['k_up'][-1]:.3f} k_down {c['k_down'][-1]:.3f} at D+{args.horizon} "
+                  f"(raw P10-P90 {run['model']['raw_end']['p10']:,.0f}-{run['model']['raw_end']['p90']:,.0f})")
         print(f"[monthly] spot {run['spot']:,.0f} | D+{args.horizon}: P5 {end['p5']:,.0f}  "
               f"P50 {end['p50']:,.0f}  P95 {end['p95']:,.0f} | GARCH {run['model']['method']} "
               f"sigma_now {run['model']['sigma_now_ann_pct']:.1f}% ann | wrote {path}")
@@ -162,6 +187,8 @@ def main(argv: list[str] | None = None) -> int:
                 cells = "  ".join(f"{m['method']}: cov80 {m['coverage']['80']:.1%} pin {m['pinball']:.4f}"
                                   for m in h["methods"])
                 print(f"[backtest] h={h['h']:>2} ({h['origins']} origins, ~{h['independent']} independent) {cells}")
+            print(f"[backtest] {run['backtest']['warmup_origins']} warm-up origins excluded from scoring "
+                  f"(calibration needs {run['backtest']['calibration']['min_cal_origins']} realised outcomes first)")
 
         if db:
             db.upsert(TABLE, run, on_conflict="id")
