@@ -253,7 +253,7 @@ after `t` leak in). It fixed the upside skew and lifted 2020–21 coverage to 81
 the calm years: 30-day coverage 86.6% and pinball **up** at every horizon. Rolling 52/104/156-origin
 windows and a symmetric variant also raised pinball everywhere. The reported variant is the one
 specified before seeing results; choosing the best-scoring variant on these origins would leak the
-test set into the choice. Published bands are raw FHS; `--calibrate` opts in.
+test set into the choice. Published bands are not recalibrated; `--calibrate` opts in.
 
 **Eight further improvements were tried and none survived a held-out test**
 (`worker/research/improve_monthly.py`). Candidates were declared up front, chosen on validation
@@ -278,6 +278,28 @@ test regime (85%). Any fixed correction learned in one regime is wrong in the ne
 validation gain is smaller than that swing. With price history as the only input, this model is at
 its ceiling; the next real gain needs information price does not contain — forward-looking
 implied volatility (Deribit DVOL, daily history from 2021) is the obvious candidate.
+
+**Implied volatility did carry over — and is what ships** (`worker/research/dvol_monthly.py`,
+`worker/iris_worker/dvol.py`). Same protocol: candidates declared first, chosen on validation
+(2021-07 → 2022-12, 76 origins — DVOL history starts 2021-03), winner scored once on test
+(2023-01 → 2026-07, 185 origins). Winner: FHS with every path starting from Deribit DVOL × a
+walk-forward variance-risk-premium factor (median realised/implied over 30-day windows that had
+already closed by the origin — DVOL, a risk-neutral expectation, usually runs above realised vol).
+
+| Horizon | GARCH-start FHS pinball | DVOL × VRP FHS pinball | Change | P10–P90 coverage | DM p |
+|---|---|---|---|---|---|
+| 7d | 0.0149 | 0.0147 | −1.5% | 87.0% → 77.8% | 0.21 |
+| 14d | 0.0218 | 0.0215 | −1.2% | 85.9% → 80.0% | 0.26 |
+| 30d | 0.0319 | 0.0315 | −1.3% | 85.4% → 83.8% | 0.09 |
+
+The first candidate whose validation gain survived test, in the same direction at every horizon,
+using information price history does not contain. It is **not significant at 5%** — 3½ years of
+test is short — and that is stated on the page. It ships because the evidence points one way and
+the downside is bounded: if DVOL cannot be fetched, or the latest value is more than a day older
+than the last close, the run falls back to GARCH-start FHS and says so. In the worker's own
+backtest on DVOL-era origins (2021-07 → 2026-07, 261 origins) it is best at every horizon with
+P10–P90 coverage 80.5% / 79.3% / 82.4%. A second lookahead test rewrites returns *and* DVOL after a
+cut-off and requires earlier origins to score identically.
 
 **Leakage is tested, not asserted.** `test_backtest_has_no_lookahead` rewrites every return after a
 cut-off and requires every origin whose outcome ends before it to score identically — covering the

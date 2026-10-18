@@ -28,6 +28,7 @@ export {
   WORKER_NOTE,
   BACKTEST_NOTE,
   CALIBRATION_NOTE,
+  DVOL_NOTE,
   WHY_NOT_ML_NOTE,
   LADDER_STEPS,
   ladderRows,
@@ -38,5 +39,6 @@ export {
   runInsideTone,
   bestByPinball,
   methodShort,
+  shippedMethod,
   nextScheduledRun,
 } from './present';

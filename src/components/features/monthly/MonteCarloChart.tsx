@@ -76,7 +76,7 @@ export function MonteCarloChart({ fc }: { fc: Envelope<MonthlyForecastData> }) {
     <Panel>
       <PanelHeader
         title="30-DAY MONTE CARLO"
-        note={`${d.nPaths.toLocaleString('en-US')} paths · FHS · as of ${fmtDayMonth(d.asOf)}`}
+        note={`${d.nPaths.toLocaleString('en-US')} paths · FHS${d.model.volSource === 'dvol_vrp' ? ' · DVOL vol' : ''} · as of ${fmtDayMonth(d.asOf)}`}
         right={
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Tag label="P25–P75" tone="blue" />

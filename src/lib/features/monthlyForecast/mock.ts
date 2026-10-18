@@ -66,7 +66,7 @@ export function mockMonthlyForecast({ trackRecordRuns = 8 }: MonthlyForecastArgs
     h,
     origins: 385,
     independent: Math.floor((385 * 7) / h),
-    methods: (['fhs', 'fhs_cal', 'iid', 'garch_normal'] as const).map((method) => ({
+    methods: (['fhs', 'fhs_dvol', 'fhs_cal', 'iid', 'garch_normal'] as const).map((method) => ({
       method,
       label: method,
       coverage: { '50': 0.5 + r() * 0.1, '80': 0.76 + r() * 0.08, '90': 0.86 + r() * 0.07 },
@@ -122,8 +122,12 @@ export function mockMonthlyForecast({ trackRecordRuns = 8 }: MonthlyForecastArgs
       driftRemovedDaily: 0.0013,
       expectedMovePct: ((end.p75 - end.p25) / 2 / spot) * 100,
       rangeP5P95Pct: ((end.p95 - end.p5) / spot) * 100,
+      volSource: 'dvol_vrp',
+      sigmaGarchAnnPct: 36,
+      dvolPct: 44,
+      vrpFactor: 0.79,
       calibrationApplied: false,
-      calibrationNote: 'evaluated out of sample and rejected: higher pinball loss than raw FHS',
+      calibrationNote: 'evaluated out of sample and rejected: higher pinball loss than uncalibrated bands',
       probabilities: [-30, -20, -10, 0, 10, 20, 30].map((pct) => {
         const z = Math.log(1 + pct / 100) / (sigma * Math.sqrt(horizon));
         // Normal survival via the Abramowitz–Stegun erf approximation.
@@ -145,6 +149,12 @@ export function mockMonthlyForecast({ trackRecordRuns = 8 }: MonthlyForecastArgs
       byYear: ['2020', '2021', '2022', '2023', '2024', '2025'].map((year) => ({
         year,
         coverage: 0.6 + r() * 0.35,
+        origins: 52,
+      })),
+      dvolUsed: true,
+      byYearDvol: ['2021', '2022', '2023', '2024', '2025'].map((year) => ({
+        year,
+        coverage: 0.72 + r() * 0.16,
         origins: 52,
       })),
       byYearCal: ['2020', '2021', '2022', '2023', '2024', '2025'].map((year) => ({

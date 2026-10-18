@@ -4,13 +4,22 @@ export const MONTHLY_NOTE =
   'A distribution of where price could be on each of the next 30 days, conditional on today’s volatility — not a call on direction. Drift is removed, so the median sits near spot by construction. Thin lines are real simulated paths picked across the range of outcomes; they illustrate the spread, they are not predictions.';
 
 export const WORKER_NOTE =
-  'Computed once a week (Monday 00:20 UTC) by the Python worker, not on page load. Same FHS engine as the Distribution page, run on 10,000 paths and stored, so every published forecast can later be scored against the price that actually happened.';
+  'Computed once a week (Monday 00:20 UTC) by the Python worker, not on page load. Same FHS engine as the Distribution page, but each path starts from Deribit’s implied volatility (VRP-adjusted) when available; 10,000 paths, stored, so every published forecast can later be scored against the price that actually happened.';
 
 export const BACKTEST_NOTE =
   'Rolling-origin and out of sample: at every weekly origin the model saw only earlier data, GARCH was re-fitted yearly on an expanding window. Overlapping windows are not independent — the INDEP. column is the honest sample size.';
 
 export const CALIBRATION_NOTE =
-  'FHS + CAL rescales the bands per side with split-conformal factors learned only from origins whose outcome had already happened (t′ + h ≤ t). It pulls coverage toward 80% in some years but raised pinball loss at every horizon, so the published bands are raw FHS. Early origins are a warm-up for that calibration and are excluded for every engine, so all rows are scored on the same dates.';
+  'FHS + CAL rescales the bands per side with split-conformal factors learned only from origins whose outcome had already happened (t′ + h ≤ t). It pulls coverage toward 80% in some years but raised pinball loss at every horizon, so the published bands are not recalibrated. Early origins are a warm-up for that calibration and are excluded for every engine, so all rows are scored on the same dates.';
+
+export const DVOL_NOTE =
+  'FHS + DVOL starts every path from Deribit’s 30-day implied volatility, scaled by the median realised/implied ratio over 30-day windows that had already closed (DVOL usually runs above what is then realised). In the pre-registered test on 2023–26 origins it lowered pinball loss 1.2–1.5% at 7/14/30 days versus GARCH-start FHS — consistent in direction but not significant at 5% (DM p = 0.21 / 0.26 / 0.09). If DVOL cannot be fetched the run falls back to GARCH. With DVOL, every engine is scored only on DVOL-era origins.';
+
+/** Which backtest row is the engine behind the published bands. */
+export function shippedMethod(runMethod: string): BacktestMethod['method'] {
+  if (runMethod.endsWith('_cal')) return 'fhs_cal';
+  return runMethod.startsWith('fhs_dvol') ? 'fhs_dvol' : 'fhs';
+}
 
 export const WHY_NOT_ML_NOTE =
   'Why no ML model here: XGBoost quantile models on price, technical, macro and on-chain features did not beat a constant historical-quantile baseline on pinball loss in walk-forward tests, and their median got the 30-day direction right less often than “always up”. Volatility is forecastable; direction at this horizon was not. See worker/research/.';
@@ -51,6 +60,7 @@ export const bestByPinball = (methods: BacktestMethod[]) =>
 
 export const methodShort: Record<BacktestMethod['method'], string> = {
   fhs: 'FHS',
+  fhs_dvol: 'FHS + DVOL',
   fhs_cal: 'FHS + CAL',
   iid: 'IID',
   garch_normal: 'GARCH-N',

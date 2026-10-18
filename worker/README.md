@@ -9,6 +9,7 @@ Python jobs that run outside the web app and write to Supabase. The Next.js app 
 | Data | Daily BTC-USD closes from Coinbase Exchange (paged back to ~2016), Kraken fallback. Only completed UTC days. |
 | Model | GARCH(1,1), variance-targeted, grid-search MLE (EWMA fallback). Port of `src/lib/quant/garch.ts`. |
 | Simulation | Filtered Historical Simulation, 10,000 paths, 30 daily steps, drift removed. Port of `src/lib/quant/fhs.ts`. |
+| Start vol | Deribit DVOL × walk-forward VRP factor (realised/implied over 30-day windows already closed). Falls back to GARCH if DVOL cannot be fetched. `--no-dvol` forces GARCH, `--dvol-csv` reads a CSV. |
 | Output | P5/P10/P25/P50/P75/P90/P95 for every day D+0…D+30, 24 representative paths, probability ladder. |
 | Backtest | Rolling-origin out-of-sample (weekly origins, yearly refits, everything at origin *t* from data before *t*): coverage, pinball, PIT, upside/downside misses for FHS vs FHS+conformal vs i.i.d. vs GARCH-Normal, all on the same origins. |
 | Calibration | Split-conformal band rescaling, learned only from outcomes realised before each origin. Evaluated and **off by default** — it raised pinball loss at every horizon. `--calibrate` opts in. |
@@ -34,7 +35,9 @@ export SUPABASE_SERVICE_ROLE_KEY=...      # service role, NOT the anon key
 python -m iris_worker.monthly
 ```
 
-Flags: `--horizon 30`, `--paths 10000`, `--lines 24`, `--no-backtest`, `--backtest-paths 1000`, `--calibrate`, `--out out`.
+Flags: `--horizon 30`, `--paths 10000`, `--lines 24`, `--no-backtest`, `--backtest-paths 1000`, `--calibrate`, `--dvol-csv FILE`, `--no-dvol`, `--out out`.
+
+Deribit is unreachable from some Indonesian ISPs; that only matters for local runs. GitHub Actions reaches it, and a local run can use `--dvol-csv` with a file fetched there.
 
 ### Deploy (one-time)
 
@@ -56,4 +59,7 @@ Reproduces the comparison that ruled out a directional ML model (see `docs/DECIS
 ```bash
 pip install -r research/requirements.txt
 python research/benchmark_xgb_vs_baselines.py path/to/btc_master_2.csv
+python research/improve_monthly.py path/to/btc_master_1.csv          # 8 price-only candidates: none survived test
+python research/dvol_monthly.py path/to/btc_master_1.csv dvol.csv   # DVOL candidates: the shipped one
+python research/dvol_monthly.py path/to/btc_master_1.csv dvol.csv --self-test   # lookahead check
 ```

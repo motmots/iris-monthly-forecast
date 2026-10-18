@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from iris_worker import dvol as dvol_mod
 from iris_worker.backtest import conformal_k, run_backtest
 from iris_worker.fhs import recalibrate, simulate
 from iris_worker.garch import fit_garch11, forecast_sigma_path
@@ -161,3 +162,77 @@ def test_recalibrate_keeps_median_and_order():
     up_raw = np.log(sim.bands[-1, 5] / sim.bands[-1, 3])
     up_cal = np.log(cal.bands[-1, 5] / cal.bands[-1, 3])
     assert up_cal == pytest.approx(1.5 * up_raw, rel=1e-3)
+
+
+def _dvol_for(r, dates, start=600, premium=1.15, seed=0):
+    """Synthetic DVOL: trailing realised vol x premium, from close `start` on."""
+    rng = np.random.default_rng(seed)
+    out = {}
+    for i in range(start, len(r) + 1):
+        v = r[max(0, i - 30):i].std() * np.sqrt(365) * 100 * premium * np.exp(rng.normal(0, 0.05))
+        out[dates[i]] = float(v)
+    return out
+
+
+def test_dvol_alignment_and_vrp_use_only_closed_windows():
+    r = garch_series(n=800, seed=2)
+    dates = [str(np.datetime64("2020-01-01") + np.timedelta64(i, "D")) for i in range(len(r) + 1)]
+    sig = dvol_mod.align(dates, _dvol_for(r, dates, start=100))
+    assert len(sig) == len(r) + 1 and np.isnan(sig[0]) and np.isfinite(sig[100])
+    rv = dvol_mod.realised_windows(r)
+    np.testing.assert_allclose(rv[10], r[10:40].std(), rtol=1e-9)
+    t = 500
+    k = dvol_mod.vrp_factor(sig, rv, t)
+    # Changing a window that is still open at t (i + 30 > t) must not move the factor.
+    rv2 = rv.copy()
+    rv2[t - 29:] *= 10
+    assert dvol_mod.vrp_factor(sig, rv2, t) == k
+    rv2[: t - 29] *= 10                     # windows that have closed do count
+    assert dvol_mod.vrp_factor(sig, rv2, t) == pytest.approx(10 * k)
+    # Boundary: exactly VRP_MIN_PAIRS windows closed by t (last one i = t - 30) -> usable;
+    # shift them one day later (last one i = t - 29, still open at t) -> not usable.
+    n_min = dvol_mod.VRP_MIN_PAIRS
+    for last, usable in ((t - 30, True), (t - 29, False)):
+        only = np.full_like(sig, np.nan)
+        only[last - n_min + 1: last + 1] = sig[last - n_min + 1: last + 1]
+        assert (dvol_mod.vrp_factor(only, rv, t) is not None) is usable
+    s0, raw, kk = dvol_mod.start_sigma(sig, rv, t)
+    assert raw == sig[t] and kk == k and s0 == pytest.approx(raw * k)
+    assert dvol_mod.start_sigma(sig, rv, 90) is None      # before DVOL / VRP warm-up
+
+
+def test_backtest_with_dvol_has_no_lookahead():
+    r = garch_series(n=2000, seed=21)
+    dates = [str(np.datetime64("2018-01-01") + np.timedelta64(i, "D")) for i in range(len(r) + 1)]
+    dv = _dvol_for(r, dates, start=700)
+    kw = dict(horizons=(7, 14), train_min_days=900, step_days=7, n_paths=300, min_cal_origins=20,
+              return_records=True)
+    cut = 1700
+    a = run_backtest(r, dates[1:], dvol_sigma=dvol_mod.align(dates, dv), **kw)
+    r2 = r.copy()
+    r2[cut:] = np.random.default_rng(5).standard_normal(len(r) - cut) * 0.08
+    dv2 = {d: (v * 4 if d > dates[cut] else v) for d, v in dv.items()}
+    b = run_backtest(r2, dates[1:], dvol_sigma=dvol_mod.align(dates, dv2), **kw)
+    assert "fhs_dvol" in a["records"][0]["scores"]
+    rec_b = {x["t"]: x for x in b["records"]}
+    checked = 0
+    for x in a["records"]:
+        if x["t"] + 14 <= cut:
+            assert x["scores"] == rec_b[x["t"]]["scores"], f"origin {x['t']} saw the future"
+            checked += 1
+    assert checked > 20
+    assert any(x["scores"]["fhs_dvol"] != rec_b[x["t"]]["scores"]["fhs_dvol"]
+               for x in a["records"] if x["t"] > cut)
+
+
+def test_build_run_uses_dvol_and_falls_back_without_it():
+    r = garch_series(n=900)
+    closes = list(30000 * np.exp(np.concatenate([[0], np.cumsum(r)])))
+    dates = [str(np.datetime64("2023-01-01") + np.timedelta64(i, "D")) for i in range(len(closes))]
+    with_dv = build_run(Series(dates, closes, "test"), 30, 2000, False, 0, 60, 12,
+                        dvol_by_date=_dvol_for(r, dates, start=200))
+    assert with_dv["method"] == "fhs_dvol" and with_dv["model"]["vol_source"] == "dvol_vrp"
+    assert with_dv["model"]["vrp_factor"] > 0 and with_dv["model"]["dvol_pct"] > 0
+    stale = {d: v for d, v in _dvol_for(r, dates, start=200).items() if d < dates[-3]}
+    fb = build_run(Series(dates, closes, "test"), 30, 2000, False, 0, 60, 12, dvol_by_date=stale)
+    assert fb["method"] == "fhs" and fb["model"]["vol_source"] == "garch" and fb["model"]["dvol_pct"] is None

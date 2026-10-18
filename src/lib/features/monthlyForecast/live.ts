@@ -65,6 +65,10 @@ function toModel(m: Record<string, unknown>): MonthlyForecastData['model'] {
     driftRemovedDaily: num(m.drift_removed_daily),
     expectedMovePct: num(m.expected_move_pct),
     rangeP5P95Pct: num(m.range_p5_p95_pct),
+    volSource: m.vol_source === 'dvol_vrp' ? 'dvol_vrp' : 'garch',
+    sigmaGarchAnnPct: num(m.sigma_garch_ann_pct, num(m.sigma_now_ann_pct)),
+    dvolPct: numOrNull(m.dvol_pct),
+    vrpFactor: numOrNull(m.vrp_factor),
     calibrationApplied: Boolean((m.calibration as Record<string, unknown> | undefined)?.applied),
     calibrationNote: (() => {
       const c = m.calibration as Record<string, unknown> | undefined;
@@ -112,6 +116,8 @@ function toBacktest(b: Record<string, unknown> | null): MonthlyBacktest | null {
     horizons,
     byYear: years(b.fhs_coverage80_by_year_h30),
     byYearCal: years(b.fhs_cal_coverage80_by_year_h30),
+    byYearDvol: years(b.fhs_dvol_coverage80_by_year_h30),
+    dvolUsed: Boolean(b.dvol_used),
   };
 }
 

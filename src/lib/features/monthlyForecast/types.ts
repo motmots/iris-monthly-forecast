@@ -48,10 +48,18 @@ export interface MonthlyModelState {
   /** Whether conformal recalibration was applied to the published bands. */
   calibrationApplied: boolean;
   calibrationNote: string | null;
+  /** Where the paths' starting vol came from: Deribit DVOL x VRP, or GARCH (fallback). */
+  volSource: 'dvol_vrp' | 'garch';
+  /** GARCH conditional vol, annualised — what the start vol would be without DVOL. */
+  sigmaGarchAnnPct: number;
+  /** Raw DVOL at the as-of close (annualised %), null on the GARCH fallback. */
+  dvolPct: number | null;
+  /** Walk-forward realised/implied factor applied to DVOL, null on the fallback. */
+  vrpFactor: number | null;
 }
 
 export interface BacktestMethod {
-  method: 'fhs' | 'fhs_cal' | 'iid' | 'garch_normal';
+  method: 'fhs' | 'fhs_dvol' | 'fhs_cal' | 'iid' | 'garch_normal';
   label: string;
   /** Empirical coverage of the central 50 / 80 / 90 % bands, 0–1. */
   coverage: { '50': number; '80': number; '90': number };
@@ -83,6 +91,10 @@ export interface MonthlyBacktest {
   byYear: { year: string; coverage: number; origins: number }[];
   /** Same, for the recalibrated variant that was evaluated but not shipped. */
   byYearCal: { year: string; coverage: number; origins: number }[];
+  /** Same, for FHS + DVOL; empty when the run had no DVOL. */
+  byYearDvol: { year: string; coverage: number; origins: number }[];
+  /** Whether the backtest included the DVOL engine (scored on DVOL-era origins). */
+  dvolUsed: boolean;
 }
 
 /** One earlier run scored against what price actually did. */

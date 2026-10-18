@@ -26,10 +26,20 @@ export function MonthlyModelPanel({ fc }: { fc: Envelope<MonthlyForecastData> })
       <KeyValueRow label="COMPUTED" value={fmtAgo(d.runAt)} sub={`next scheduled ${nextScheduledRun(d.runAt)}`} />
       <KeyValueRow label="AS OF CLOSE" value={d.asOf} tone="mut" sub={`spot ${fmtUsd(d.spot)} · ${d.priceSource}`} />
       <KeyValueRow
+        label="VOL SOURCE"
+        value={m.volSource === 'dvol_vrp' ? 'DVOL × VRP' : 'GARCH'}
+        tone={m.volSource === 'dvol_vrp' ? 'blue' : 'amber'}
+        sub={
+          m.volSource === 'dvol_vrp' && m.dvolPct !== null && m.vrpFactor !== null
+            ? `Deribit DVOL ${m.dvolPct.toFixed(1)}% × ${m.vrpFactor.toFixed(3)} realised/implied`
+            : 'fallback: DVOL unavailable for this run'
+        }
+      />
+      <KeyValueRow
         label="VOL NOW"
         value={`${m.sigmaNowAnnPct.toFixed(1)}%`}
         tone={m.sigmaNowAnnPct > m.sigmaLongRunAnnPct ? 'amber' : 'txt'}
-        sub={`annualised · long run ${m.sigmaLongRunAnnPct.toFixed(1)}%`}
+        sub={`annualised start vol · GARCH ${m.sigmaGarchAnnPct.toFixed(1)}% · long run ${m.sigmaLongRunAnnPct.toFixed(1)}%`}
       />
       <KeyValueRow
         label="GARCH"
@@ -41,7 +51,7 @@ export function MonthlyModelPanel({ fc }: { fc: Envelope<MonthlyForecastData> })
       <KeyValueRow label="P5–P95 SPAN" value={`${m.rangeP5P95Pct.toFixed(1)}%`} tone="mut" sub="of spot, at D+30" />
       <KeyValueRow
         label="CALIBRATION"
-        value={m.calibrationApplied ? 'CONFORMAL' : 'RAW FHS'}
+        value={m.calibrationApplied ? 'CONFORMAL' : 'OFF'}
         tone={m.calibrationApplied ? 'amber' : 'mut'}
         sub={m.calibrationApplied ? 'bands rescaled from backtest' : m.calibrationNote ?? 'not applied'}
       />

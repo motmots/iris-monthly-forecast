@@ -55,16 +55,18 @@ from statistics import NormalDist
 import numpy as np
 
 from .fhs import DEFAULT_QUANTILES, simulate
+from .dvol import realised_windows, start_sigma as dvol_start_sigma
 from .garch import GarchFit, filter_sigma, fit_garch11, forecast_sigma_path
 
 BANDS = {50: (0.25, 0.75), 80: (0.10, 0.90), 90: (0.05, 0.95)}
 METHOD_LABELS = {
     "fhs": "FHS · GARCH-filtered bootstrap",
+    "fhs_dvol": "FHS, start vol = DVOL x walk-forward VRP",
     "fhs_cal": "FHS + conformal recalibration (evaluated, not shipped)",
     "iid": "i.i.d. bootstrap",
     "garch_normal": "GARCH + Normal (closed form)",
 }
-METHODS = ("fhs", "fhs_cal", "iid", "garch_normal")
+BASE_METHODS = ("fhs", "fhs_cal", "iid", "garch_normal")
 TARGET_TAIL = 0.10           # each side of the P10–P90 band
 K_CLIP = (0.5, 3.0)          # guard against a degenerate calibration window
 I10, I50, I90 = 1, 3, 5      # indices into DEFAULT_QUANTILES
@@ -118,10 +120,16 @@ def run_backtest(
     min_cal_origins: int = 52,
     cal_window: int | None = None,
     symmetric: bool = False,
+    dvol_sigma: np.ndarray | None = None,
     return_records: bool = False,
 ) -> dict:
     """``dates[i]`` is the date of the close that ends return ``i``; origin ``t``
-    is therefore dated ``dates[t - 1]`` (the last close the model has seen)."""
+    is therefore dated ``dates[t - 1]`` (the last close the model has seen).
+
+    ``dvol_sigma`` (optional) is DVOL as a daily sigma per *close*, length
+    ``len(log_returns) + 1`` (``dvol.align``). When given, the ``fhs_dvol``
+    engine is added and every engine is scored only on origins where it exists.
+    """
     r = np.asarray(log_returns, dtype=float)
     n = len(r)
     H = max(horizons)
@@ -136,7 +144,12 @@ def run_backtest(
     fhs_q = np.empty((K, H, len(levels)))          # log-return quantiles, steps 1..H
     y_all = np.empty((K, H))                       # realised cumulative log return, 1..H
     fhs_cum = {h: np.empty((K, n_paths)) for h in horizons}
-    base = {m: {h: np.empty((K, 2)) for h in horizons} for m in ("fhs", "iid", "garch_normal")}
+    use_dvol = dvol_sigma is not None
+    sim_methods = ("fhs", "iid", "garch_normal") + (("fhs_dvol",) if use_dvol else ())
+    METHODS = BASE_METHODS[:1] + (("fhs_dvol",) if use_dvol else ()) + BASE_METHODS[1:]
+    base = {m: {h: np.full((K, 2), np.nan) for h in horizons} for m in sim_methods}
+    has_dvol = np.zeros(K, dtype=bool)
+    rv = realised_windows(r) if use_dvol else None
 
     fit: GarchFit | None = None
     pool = None
@@ -156,6 +169,11 @@ def run_backtest(
                        start_sigma=s_now, residual_pool=pool)
         iid = simulate(hist, H, n_paths, seed + k, "iid", "none", fit=fit)
         sig_path = forecast_sigma_path(fit, H, s_now)
+        dv = dvol_start_sigma(dvol_sigma, rv, t) if use_dvol else None
+        if dv is not None:
+            has_dvol[k] = True
+            fdv = simulate(hist, H, n_paths, seed + k, "fhs", "none", fit=fit,
+                           start_sigma=dv[0], residual_pool=pool)
 
         fhs_q[k] = np.quantile(fhs.cum[1:], levels, axis=1).T
         y_all[k] = np.cumsum(r[t:t + H])            # the future: used only for scoring
@@ -169,6 +187,9 @@ def run_backtest(
             s = float(np.sqrt(np.sum(sig_path[:h] ** 2)))
             qs = np.array([_ND.inv_cdf(q) * s for q in levels])
             base["garch_normal"][h][k] = (_ND.cdf(y / s) if s > 0 else 0.5, _pinball(y, qs, levels))
+            if dv is not None:
+                c = fdv.cum[h]
+                base["fhs_dvol"][h][k] = ((c <= y).mean(), _pinball(y, np.quantile(c, levels), levels))
 
     # ---- walk-forward calibration: origin k may only use j with t_j + h <= t_k
     up_all, dn_all = side_ratios(y_all, fhs_q)      # (K, H)
@@ -191,6 +212,8 @@ def run_backtest(
                     k_dn[k, h - 1] = conformal_k(dn_all[mask, h - 1])
 
     evaluable = np.isfinite(k_up[:, H - 1])         # implies every shorter horizon too
+    if use_dvol:
+        evaluable &= has_dvol                       # same origins for every engine
     ev = np.flatnonzero(evaluable)
     if len(ev) == 0:
         raise ValueError("not enough origins to warm up the calibration")
@@ -238,7 +261,7 @@ def run_backtest(
 
     out = {
         "origins": int(len(ev)),
-        "warmup_origins": int(K - len(ev)),
+        "warmup_origins": int(K - len(ev)),   # calibration warm-up and, with DVOL, pre-DVOL origins
         "first_origin": dates[origins[ev[0]] - 1],
         "last_origin": dates[origins[-1] - 1],
         "step_days": step_days,
@@ -248,6 +271,8 @@ def run_backtest(
         "horizons": out_h,
         "fhs_coverage80_by_year_h30": by_year("fhs"),
         "fhs_cal_coverage80_by_year_h30": by_year("fhs_cal"),
+        "fhs_dvol_coverage80_by_year_h30": by_year("fhs_dvol") if use_dvol else [],
+        "dvol_used": use_dvol,
         "calibration": {
             "method": "asymmetric split-conformal scaling of FHS bands around the median",
             "target_tail_each_side": TARGET_TAIL,

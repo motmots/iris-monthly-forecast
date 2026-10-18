@@ -25,6 +25,7 @@ from datetime import date, datetime, timedelta, timezone
 import numpy as np
 
 from . import __version__
+from . import dvol as dvol_mod
 from .backtest import run_backtest
 from .fhs import recalibrate, simulate
 from .prices import load_daily
@@ -46,13 +47,31 @@ def _r(x: float, nd: int = 2) -> float:
 
 
 def build_run(series, horizon: int, n_paths: int, backtest: bool, backtest_paths: int,
-              history_days: int, n_lines: int, calibrate: bool = False) -> dict:
+              history_days: int, n_lines: int, calibrate: bool = False,
+              dvol_by_date: dict[str, float] | None = None) -> dict:
     closes = np.asarray(series.closes, dtype=float)
     log_ret = np.diff(np.log(closes))
     as_of = series.dates[-1]
     spot = float(closes[-1])
+    seed = _seed(as_of)
 
-    raw = simulate(log_ret, horizon, n_paths, seed=_seed(as_of), method="fhs", drift_mode="zero")
+    # Baseline: paths start from GARCH's conditional vol.
+    garch = simulate(log_ret, horizon, n_paths, seed=seed, method="fhs", drift_mode="zero")
+
+    # Shipped when available: same engine and residual pool, start vol from DVOL x VRP.
+    # DVOL at the as-of close (or at most MAX_STALE_DAYS older); VRP from windows
+    # that closed by the as-of date. Falls back to GARCH when DVOL is unavailable.
+    dvol_sigma = dvol_mod.align(series.dates, dvol_by_date) if dvol_by_date else None
+    dv = None
+    if dvol_sigma is not None:
+        dv = dvol_mod.start_sigma(dvol_sigma, dvol_mod.realised_windows(log_ret), len(log_ret))
+    if dv is not None:
+        raw = simulate(log_ret, horizon, n_paths, seed=seed, method="fhs", drift_mode="zero",
+                       fit=garch.fit, start_sigma=dv[0])
+        vol_source = "dvol_vrp"
+    else:
+        raw = garch
+        vol_source = "garch"
 
     # Backtest first: it supplies the calibration factors. Every origin in it has
     # its outcome inside the history (t + h <= last close), so using all of them
@@ -61,7 +80,7 @@ def build_run(series, horizon: int, n_paths: int, backtest: bool, backtest_paths
     if backtest:
         t0 = time.time()
         bt = run_backtest(log_ret, series.dates[1:], horizons=tuple(sorted({7, 14, horizon})),
-                          n_paths=backtest_paths)
+                          n_paths=backtest_paths, dvol_sigma=dvol_sigma)
         bt["seconds"] = round(time.time() - t0, 1)
 
     cal = (bt or {}).get("calibration")
@@ -72,7 +91,7 @@ def build_run(series, horizon: int, n_paths: int, backtest: bool, backtest_paths
     else:
         sim = raw
         calibration = {"applied": False,
-                       "reason": "evaluated out of sample and rejected: higher pinball loss than raw FHS"
+                       "reason": "evaluated out of sample and rejected: higher pinball loss than uncalibrated bands"
                        if cal else "no backtest in this run"}
 
     d0 = date.fromisoformat(as_of)
@@ -94,9 +113,14 @@ def build_run(series, horizon: int, n_paths: int, backtest: bool, backtest_paths
     ann = lambda s: float(s * np.sqrt(TRADING_DAYS) * 100)  # noqa: E731
     last = sim.bands[horizon]
     model = {
-        "engine": "FHS (GARCH(1,1)-filtered historical simulation)",
+        "engine": "FHS (GARCH(1,1)-filtered historical simulation)"
+                  + (", start vol from Deribit DVOL x VRP" if vol_source == "dvol_vrp" else ""),
         **sim.fit.as_dict(),
+        "vol_source": vol_source,
         "sigma_now_ann_pct": ann(sim.start_sigma),
+        "sigma_garch_ann_pct": ann(garch.start_sigma),
+        "dvol_pct": float(dv[1] * np.sqrt(TRADING_DAYS) * 100) if dv else None,
+        "vrp_factor": float(dv[2]) if dv else None,
         "sigma_long_run_ann_pct": ann(sim.fit.long_run_sigma),
         "drift_removed_daily": sim.drift_removed,
         "expected_move_pct": float((last[4] - last[2]) / 2 * 100),
@@ -106,6 +130,8 @@ def build_run(series, horizon: int, n_paths: int, backtest: bool, backtest_paths
         "calibration": calibration,
         # Uncalibrated D+horizon band (equals the published one unless --calibrate).
         "raw_end": {k: _r(m * spot) for k, m in zip(QKEYS, raw.bands[horizon])},
+        # GARCH-start D+horizon band, so the effect of DVOL is visible.
+        "garch_end": {k: _r(m * spot) for k, m in zip(QKEYS, garch.bands[horizon])},
     }
 
     return {
@@ -115,7 +141,7 @@ def build_run(series, horizon: int, n_paths: int, backtest: bool, backtest_paths
         "spot": _r(spot),
         "horizon_days": horizon,
         "n_paths": n_paths,
-        "method": "fhs_cal" if calibration["applied"] else sim.method,
+        "method": ("fhs_dvol" if vol_source == "dvol_vrp" else "fhs") + ("_cal" if calibration["applied"] else ""),
         "drift_mode": sim.drift_mode,
         "price_source": series.source.split(":")[0],
         "sample_days": int(len(log_ret)),
@@ -153,6 +179,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--calibrate", action="store_true",
                     help="publish conformally rescaled bands. Off by default: in the leakage-free "
                          "backtest it raised pinball loss at every horizon (docs/DECISIONS.md §4)")
+    ap.add_argument("--dvol-csv", help="read DVOL (date + close) from a CSV instead of Deribit")
+    ap.add_argument("--no-dvol", action="store_true", help="start paths from GARCH vol only")
     ap.add_argument("--dry-run", action="store_true", help="do not touch Supabase")
     ap.add_argument("--out", default="out")
     args = ap.parse_args(argv)
@@ -166,9 +194,23 @@ def main(argv: list[str] | None = None) -> int:
     try:
         series = load_daily(args.csv)
         print(f"[monthly] {len(series)} closes {series.dates[0]} -> {series.dates[-1]} via {series.source}")
+        dvol_by_date = None
+        if not args.no_dvol:
+            try:
+                dvol_by_date = (dvol_mod.load_dvol_csv(args.dvol_csv) if args.dvol_csv
+                                else dvol_mod.fetch_dvol())
+                print(f"[monthly] DVOL {len(dvol_by_date)} days, last {max(dvol_by_date)}")
+            except Exception as exc:  # noqa: BLE001 — degrade to GARCH, never fail the run
+                print(f"[monthly] DVOL unavailable, falling back to GARCH start vol: {exc}", file=sys.stderr)
         run = build_run(series, args.horizon, args.paths, not args.no_backtest,
                         args.backtest_paths, args.history_days, args.lines,
-                        calibrate=args.calibrate)
+                        calibrate=args.calibrate, dvol_by_date=dvol_by_date)
+        m = run["model"]
+        if m["vol_source"] == "dvol_vrp":
+            print(f"[monthly] start vol {m['sigma_now_ann_pct']:.1f}% ann = DVOL {m['dvol_pct']:.1f}% x VRP "
+                  f"{m['vrp_factor']:.3f} (GARCH would be {m['sigma_garch_ann_pct']:.1f}%)")
+        else:
+            print(f"[monthly] start vol from GARCH: {m['sigma_now_ann_pct']:.1f}% ann")
 
         os.makedirs(args.out, exist_ok=True)
         path = os.path.join(args.out, f"monthly_forecast_{run['as_of']}.json")
@@ -180,15 +222,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[monthly] calibration k_up {c['k_up'][-1]:.3f} k_down {c['k_down'][-1]:.3f} at D+{args.horizon} "
                   f"(raw P10-P90 {run['model']['raw_end']['p10']:,.0f}-{run['model']['raw_end']['p90']:,.0f})")
         print(f"[monthly] spot {run['spot']:,.0f} | D+{args.horizon}: P5 {end['p5']:,.0f}  "
-              f"P50 {end['p50']:,.0f}  P95 {end['p95']:,.0f} | GARCH {run['model']['method']} "
-              f"sigma_now {run['model']['sigma_now_ann_pct']:.1f}% ann | wrote {path}")
+              f"P50 {end['p50']:,.0f}  P95 {end['p95']:,.0f} | engine {run['method']} | wrote {path}")
         if run["backtest"]:
             for h in run["backtest"]["horizons"]:
                 cells = "  ".join(f"{m['method']}: cov80 {m['coverage']['80']:.1%} pin {m['pinball']:.4f}"
                                   for m in h["methods"])
                 print(f"[backtest] h={h['h']:>2} ({h['origins']} origins, ~{h['independent']} independent) {cells}")
-            print(f"[backtest] {run['backtest']['warmup_origins']} warm-up origins excluded from scoring "
-                  f"(calibration needs {run['backtest']['calibration']['min_cal_origins']} realised outcomes first)")
+            print(f"[backtest] {run['backtest']['warmup_origins']} early origins excluded so every engine is "
+                  f"scored on the same dates (calibration warm-up"
+                  f"{' and pre-DVOL history' if run['backtest']['dvol_used'] else ''})")
 
         if db:
             db.upsert(TABLE, run, on_conflict="id")

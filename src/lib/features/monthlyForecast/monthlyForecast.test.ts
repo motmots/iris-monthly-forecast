@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { coverageTone, nextScheduledRun, runInsideTone, ladderRows } from './present';
+import { coverageTone, nextScheduledRun, runInsideTone, ladderRows, shippedMethod } from './present';
 import { mockMonthlyForecast } from './mock';
 
 /**
@@ -102,6 +102,8 @@ describe('fetchMonthlyForecast', () => {
     expect(d.spot).toBeCloseTo(63551.88);
     expect(d.bands).toHaveLength(3);
     expect(d.model.volModel).toBe('garch');
+    expect(d.model.volSource).toBe('garch'); // fixture has no DVOL: the fallback
+    expect(d.model.dvolPct).toBeNull();
     expect(d.model.probabilities[0].probAbove).toBeCloseTo(0.22);
     expect(d.backtest?.byYear[0].coverage).toBeCloseTo(0.94);
     expect(d.trackRecord).toHaveLength(1);
@@ -117,6 +119,12 @@ describe('present helpers', () => {
     expect(coverageTone(0.8, 80)).toBe('up');
     expect(coverageTone(0.72, 80)).toBe('amber');
     expect(coverageTone(0.95, 80)).toBe('down');
+  });
+
+  it('maps the run method to the backtest row behind the published bands', () => {
+    expect(shippedMethod('fhs_dvol')).toBe('fhs_dvol');
+    expect(shippedMethod('fhs')).toBe('fhs');
+    expect(shippedMethod('fhs_dvol_cal')).toBe('fhs_cal');
   });
 
   it('never flags a single run for holding too well', () => {

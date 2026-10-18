@@ -4,10 +4,12 @@ import type { MonthlyForecastData } from '@/lib/features/monthlyForecast';
 import {
   BACKTEST_NOTE,
   CALIBRATION_NOTE,
+  DVOL_NOTE,
   WHY_NOT_ML_NOTE,
   bestByPinball,
   coverageTone,
   methodShort,
+  shippedMethod,
 } from '@/lib/features/monthlyForecast';
 import { toneVar } from '@/lib/theme/tokens';
 
@@ -16,11 +18,12 @@ const note = { margin: 0, fontFamily: 'var(--mono)', fontSize: 8.5, lineHeight: 
 /**
  * Did the bands hold, historically? Coverage per band against its nominal level,
  * and pinball loss — the score that cannot be gamed by simply widening bands.
- * The shipped engine (FHS) is compared with two baselines on the same origins.
+ * The shipped engine (FHS + DVOL, or FHS on the fallback) is compared with the
+ * alternatives on the same origins.
  */
 export function BacktestPanel({ fc }: { fc: Envelope<MonthlyForecastData> }) {
   const bt = fc.data.backtest;
-  const shipped = fc.data.model.calibrationApplied ? 'fhs_cal' : 'fhs';
+  const shipped = shippedMethod(fc.data.method);
 
   return (
     <Panel>
@@ -74,6 +77,7 @@ export function BacktestPanel({ fc }: { fc: Envelope<MonthlyForecastData> }) {
           </DataTable>
 
           {[
+            { label: 'FHS + DVOL', rows: bt.byYearDvol },
             { label: 'FHS', rows: bt.byYear },
             { label: 'FHS + CAL', rows: bt.byYearCal },
           ].map(({ label, rows }) =>
@@ -102,6 +106,7 @@ export function BacktestPanel({ fc }: { fc: Envelope<MonthlyForecastData> }) {
 
       <div style={{ padding: '10px 12px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <p style={note}>{BACKTEST_NOTE}</p>
+        {bt?.dvolUsed ? <p style={note}>{DVOL_NOTE}</p> : null}
         <p style={note}>{CALIBRATION_NOTE}</p>
         <p style={note}>{WHY_NOT_ML_NOTE}</p>
       </div>
