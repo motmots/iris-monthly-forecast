@@ -255,6 +255,30 @@ windows and a symmetric variant also raised pinball everywhere. The reported var
 specified before seeing results; choosing the best-scoring variant on these origins would leak the
 test set into the choice. Published bands are raw FHS; `--calibrate` opts in.
 
+**Eight further improvements were tried and none survived a held-out test**
+(`worker/research/improve_monthly.py`). Candidates were declared up front, chosen on validation
+origins (2020-04 → 2022-12, 144 origins) and only the winner was scored on test (2023-01 →, 185
+origins), with a Diebold–Mariano test using Newey–West errors (overlapping windows make plain
+t-tests far too confident):
+
+| Candidate | Validation, mean pinball vs shipped |
+|---|---|
+| refit every 28 days | −0.14% |
+| last-3-years residual pool | +0.15% |
+| blended GARCH / realised start vol | +0.52% |
+| 25% / 50% of historical drift | −0.38% / −0.49% |
+| GARCH-Normal | +0.01% |
+| average of FHS and GARCH-Normal quantiles | −0.12% |
+| **average of FHS, GARCH-Normal and i.i.d. quantiles** | **−0.66%** (winner) |
+
+On test the winner was **worse**: +1.45% pinball at 7 days (DM p = 0.048), +1.52% at 14 days
+(p = 0.041), +0.76% at 30 days (p = 0.38). The reason is visible in the coverage: the shipped bands
+were too narrow in the 2020–22 validation regime (30-day coverage 71%) and too wide in the 2023–26
+test regime (85%). Any fixed correction learned in one regime is wrong in the next, and a sub-1%
+validation gain is smaller than that swing. With price history as the only input, this model is at
+its ceiling; the next real gain needs information price does not contain — forward-looking
+implied volatility (Deribit DVOL, daily history from 2021) is the obvious candidate.
+
 **Leakage is tested, not asserted.** `test_backtest_has_no_lookahead` rewrites every return after a
 cut-off and requires every origin whose outcome ends before it to score identically — covering the
 GARCH fit, volatility state, residual pool, removed drift and the calibration factors.
