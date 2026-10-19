@@ -46,8 +46,11 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        # Without Supabase secrets (a fork, a personal copy) the run still produces the
+        # forecast as a JSON artifact instead of failing every Monday.
         run: |
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
+          if [ "${{ inputs.dry_run }}" = "true" ] || [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            [ -z "$SUPABASE_URL" ] && echo "::notice::SUPABASE_URL not set: running --dry-run, forecast kept as an artifact"
             python -m iris_worker.monthly --dry-run
           else
             python -m iris_worker.monthly
