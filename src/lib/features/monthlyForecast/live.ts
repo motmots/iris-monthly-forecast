@@ -96,6 +96,7 @@ function toBacktest(b: Record<string, unknown> | null): MonthlyBacktest | null {
     h: num(h.h),
     origins: num(h.origins),
     independent: num(h.independent),
+    naiveMape: numOrNull(h.naive_mape),
     methods: (Array.isArray(h.methods) ? (h.methods as Record<string, unknown>[]) : []).map((m) => ({
       method: m.method as BacktestHorizon['methods'][number]['method'],
       label: String(m.label ?? m.method),
@@ -104,6 +105,8 @@ function toBacktest(b: Record<string, unknown> | null): MonthlyBacktest | null {
       pit: Array.isArray(m.pit) ? (m.pit as number[]) : [],
       upperMiss: numOrNull(m.upper_miss),
       lowerMiss: numOrNull(m.lower_miss),
+      mapeMedian: numOrNull(m.mape_median),
+      width80Pct: numOrNull(m.width80_pct),
     })),
   }));
   return {

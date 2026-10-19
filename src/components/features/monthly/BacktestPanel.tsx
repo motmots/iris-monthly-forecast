@@ -5,6 +5,8 @@ import {
   BACKTEST_NOTE,
   CALIBRATION_NOTE,
   DVOL_NOTE,
+  ERROR_NOTE,
+  fmtPctOrDash,
   WHY_NOT_ML_NOTE,
   bestByPinball,
   coverageTone,
@@ -44,6 +46,9 @@ export function BacktestPanel({ fc }: { fc: Envelope<MonthlyForecastData> }) {
                 <th style={{ textAlign: 'right' }}>P10–90 (80%)</th>
                 <th style={{ textAlign: 'right' }}>P5–95 (90%)</th>
                 <th style={{ textAlign: 'right' }}>PINBALL</th>
+                <th style={{ textAlign: 'right' }}>MAPE P50</th>
+                <th style={{ textAlign: 'right' }}>NAIVE</th>
+                <th style={{ textAlign: 'right' }}>P10–90 WIDTH</th>
                 <th style={{ textAlign: 'right' }}>INDEP.</th>
               </tr>
             </thead>
@@ -69,6 +74,9 @@ export function BacktestPanel({ fc }: { fc: Envelope<MonthlyForecastData> }) {
                       {m.pinball.toFixed(4)}
                       {m === best ? <span style={{ marginLeft: 6 }}><Tag label="BEST" tone="up" /></span> : null}
                     </td>
+                    <td style={{ textAlign: 'right' }}>{fmtPctOrDash(m.mapeMedian)}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--dim)' }}>{i === 0 ? fmtPctOrDash(h.naiveMape) : ''}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--mut)' }}>{fmtPctOrDash(m.width80Pct)}</td>
                     <td style={{ textAlign: 'right', color: 'var(--dim)' }}>{i === 0 ? `~${h.independent}` : ''}</td>
                   </tr>
                 ));
@@ -106,6 +114,7 @@ export function BacktestPanel({ fc }: { fc: Envelope<MonthlyForecastData> }) {
 
       <div style={{ padding: '10px 12px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <p style={note}>{BACKTEST_NOTE}</p>
+        <p style={note}>{ERROR_NOTE}</p>
         {bt?.dvolUsed ? <p style={note}>{DVOL_NOTE}</p> : null}
         <p style={note}>{CALIBRATION_NOTE}</p>
         <p style={note}>{WHY_NOT_ML_NOTE}</p>

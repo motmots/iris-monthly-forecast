@@ -41,7 +41,12 @@ Metrics
 -------
 coverage of the 50/80/90 % central bands, pinball loss over the 7-quantile
 ladder (lower is better, cannot be gamed by width), a 10-bin PIT histogram, and
-``independent`` = evaluated origins / (h / step).
+``independent`` = evaluated origins / (h / step). Also reported, because people
+ask for a single error number: MAPE of the median against the realised price,
+the same for the naive "price stays where it is" forecast, and the mean P10–P90
+width as a share of spot. With drift removed the median is near spot, so its MAPE
+tracks the naive one by design — it measures how far BTC moves, not model skill;
+coverage and pinball are what separate the engines.
 
 All methods are scored on the **same** origins: those after the calibration
 warm-up, so the calibrated engine is never compared on an easier subset.
@@ -76,6 +81,18 @@ _ND = NormalDist()
 def _pinball(y: float, qs: np.ndarray, levels: np.ndarray) -> float:
     d = y - qs
     return float(np.mean(np.maximum(levels * d, (levels - 1) * d)))
+
+
+def _score(u: float, y: float, qs: np.ndarray, levels: np.ndarray) -> tuple:
+    """Per-origin record: (PIT, pinball, |median - actual| / actual, P10–P90 width / spot).
+
+    ``y`` and ``qs`` are cumulative log returns, so prices are ``spot * exp(.)`` and
+    spot cancels from both ratios.
+    """
+    actual = math.exp(y)
+    ape = abs(math.exp(qs[I50]) - actual) / actual
+    width = math.exp(qs[I90]) - math.exp(qs[I10])
+    return (u, _pinball(y, qs, levels), ape, width)
 
 
 def conformal_k(ratios: np.ndarray, tail: float = TARGET_TAIL) -> float:
@@ -147,7 +164,7 @@ def run_backtest(
     use_dvol = dvol_sigma is not None
     sim_methods = ("fhs", "iid", "garch_normal") + (("fhs_dvol",) if use_dvol else ())
     METHODS = BASE_METHODS[:1] + (("fhs_dvol",) if use_dvol else ()) + BASE_METHODS[1:]
-    base = {m: {h: np.full((K, 2), np.nan) for h in horizons} for m in sim_methods}
+    base = {m: {h: np.full((K, 4), np.nan) for h in horizons} for m in sim_methods}
     has_dvol = np.zeros(K, dtype=bool)
     rv = realised_windows(r) if use_dvol else None
 
@@ -183,13 +200,13 @@ def run_backtest(
             fhs_cum[h][k] = fhs.cum[h]
             for m, sim in (("fhs", fhs), ("iid", iid)):
                 c = sim.cum[h]
-                base[m][h][k] = ((c <= y).mean(), _pinball(y, np.quantile(c, levels), levels))
+                base[m][h][k] = _score(float((c <= y).mean()), y, np.quantile(c, levels), levels)
             s = float(np.sqrt(np.sum(sig_path[:h] ** 2)))
             qs = np.array([_ND.inv_cdf(q) * s for q in levels])
-            base["garch_normal"][h][k] = (_ND.cdf(y / s) if s > 0 else 0.5, _pinball(y, qs, levels))
+            base["garch_normal"][h][k] = _score(_ND.cdf(y / s) if s > 0 else 0.5, y, qs, levels)
             if dv is not None:
                 c = fdv.cum[h]
-                base["fhs_dvol"][h][k] = ((c <= y).mean(), _pinball(y, np.quantile(c, levels), levels))
+                base["fhs_dvol"][h][k] = _score(float((c <= y).mean()), y, np.quantile(c, levels), levels)
 
     # ---- walk-forward calibration: origin k may only use j with t_j + h <= t_k
     up_all, dn_all = side_ratios(y_all, fhs_q)      # (K, H)
@@ -218,7 +235,7 @@ def run_backtest(
     if len(ev) == 0:
         raise ValueError("not enough origins to warm up the calibration")
 
-    cal = {h: np.empty((K, 2)) for h in horizons}
+    cal = {h: np.full((K, 4), np.nan) for h in horizons}
     for k in ev:
         for h in horizons:
             y = y_all[k, h - 1]
@@ -226,7 +243,7 @@ def run_backtest(
             med = fhs_q[k, h - 1, I50]
             c = scale_values(fhs_cum[h][k], med, ku, kd)
             qs = scale_quantiles(fhs_q[k, h - 1], ku, kd)
-            cal[h][k] = ((c <= y).mean(), _pinball(y, qs, levels))
+            cal[h][k] = _score(float((c <= y).mean()), y, qs, levels)
 
     scores = {**base, "fhs_cal": cal}
 
@@ -237,9 +254,19 @@ def run_backtest(
         return {"method": m, "label": METHOD_LABELS[m], "coverage": cov,
                 "pinball": float(scores[m][h][ev, 1].mean()), "pit": hist10.astype(int).tolist(),
                 "upper_miss": float((u > BANDS[80][1]).mean()),
-                "lower_miss": float((u < BANDS[80][0]).mean())}
+                "lower_miss": float((u < BANDS[80][0]).mean()),
+                # Point error of the median, in price terms. With drift removed the median
+                # sits on spot, so this tracks the naive "no change" error by construction.
+                "mape_median": float(scores[m][h][ev, 2].mean()),
+                "median_ape_median": float(np.median(scores[m][h][ev, 2])),
+                "width80_pct": float(scores[m][h][ev, 3].mean())}
+
+    def naive_mape(h: int) -> float:
+        a = np.exp(y_all[ev, h - 1])
+        return float(np.mean(np.abs(1.0 - a) / a))      # forecast = today's price
 
     out_h = [{"h": h, "origins": int(len(ev)), "independent": int(len(ev) * step_days // h),
+              "naive_mape": naive_mape(h),
               "methods": [summarise(m, h) for m in METHODS]} for h in horizons]
 
     def by_year(m: str) -> list[dict]:

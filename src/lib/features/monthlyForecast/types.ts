@@ -69,6 +69,10 @@ export interface BacktestMethod {
   /** Share of outcomes above P90 / below P10. */
   upperMiss: number | null;
   lowerMiss: number | null;
+  /** Mean |median − actual| / actual, in price terms. Null on runs before this was recorded. */
+  mapeMedian: number | null;
+  /** Mean P10–P90 width as a share of spot. */
+  width80Pct: number | null;
 }
 
 export interface BacktestHorizon {
@@ -76,6 +80,8 @@ export interface BacktestHorizon {
   origins: number;
   /** Non-overlapping windows — what the sample size really is. */
   independent: number;
+  /** MAPE of the naive “price stays where it is” forecast, for reference. */
+  naiveMape: number | null;
   methods: BacktestMethod[];
 }
 

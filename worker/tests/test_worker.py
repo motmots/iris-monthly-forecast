@@ -246,3 +246,18 @@ def test_parse_yahoo_chart_skips_nulls_and_uses_utc_dates():
     assert parse_yahoo_chart(body) == {"2025-08-21": 113000.5, "2025-08-23": 115500.0}
     with pytest.raises(RuntimeError):
         parse_yahoo_chart({"chart": {"error": {"code": "Not Found"}, "result": None}})
+
+
+def test_backtest_reports_point_error_against_naive():
+    r = garch_series(n=2400, seed=11)
+    dates = [str(np.datetime64("2018-01-01") + np.timedelta64(i, "D")) for i in range(len(r))]
+    bt = run_backtest(r, dates, horizons=(7, 14), train_min_days=1200, step_days=5, n_paths=600)
+    for h in bt["horizons"]:
+        fhs = next(m for m in h["methods"] if m["method"] == "fhs")
+        assert 0 < h["naive_mape"] < 0.5
+        # zero-drift median sits near spot, so its point error tracks "no change"
+        assert fhs["mape_median"] == pytest.approx(h["naive_mape"], rel=0.05)
+        assert 0 < fhs["median_ape_median"] <= fhs["mape_median"] * 1.5
+        assert fhs["width80_pct"] > 0
+    # longer horizon, bigger moves
+    assert bt["horizons"][1]["naive_mape"] > bt["horizons"][0]["naive_mape"]

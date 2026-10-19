@@ -21,6 +21,12 @@ export function shippedMethod(runMethod: string): BacktestMethod['method'] {
   return runMethod.startsWith('fhs_dvol') ? 'fhs_dvol' : 'fhs';
 }
 
+export const ERROR_NOTE =
+  'MAPE P50 is the average percentage gap between the median and the price that actually printed. With drift removed the median sits on spot, so it matches the naive “no change” forecast (NAIVE) by design — it measures how far BTC moves, not model skill. Coverage and pinball are what separate the engines; P10–90 WIDTH is how wide the 80% band was on average.';
+
+export const fmtPctOrDash = (v: number | null, digits = 1) =>
+  v === null || !Number.isFinite(v) ? '—' : `${(v * 100).toFixed(digits)}%`;
+
 export const WHY_NOT_ML_NOTE =
   'Why no ML model here: XGBoost quantile models on price, technical, macro and on-chain features did not beat a constant historical-quantile baseline on pinball loss in walk-forward tests, and their median got the 30-day direction right less often than “always up”. Volatility is forecastable; direction at this horizon was not. See worker/research/.';
 

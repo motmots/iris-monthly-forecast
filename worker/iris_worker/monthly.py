@@ -228,6 +228,12 @@ def main(argv: list[str] | None = None) -> int:
                 cells = "  ".join(f"{m['method']}: cov80 {m['coverage']['80']:.1%} pin {m['pinball']:.4f}"
                                   for m in h["methods"])
                 print(f"[backtest] h={h['h']:>2} ({h['origins']} origins, ~{h['independent']} independent) {cells}")
+            ship = "fhs_dvol" if run["model"]["vol_source"] == "dvol_vrp" else "fhs"
+            for h in run["backtest"]["horizons"]:
+                m = next(x for x in h["methods"] if x["method"] == ship)
+                print(f"[error] h={h['h']:>2} {ship}: MAPE median {m['mape_median']:.2%} "
+                      f"(naive no-change {h['naive_mape']:.2%}) | P10-P90 coverage {m['coverage']['80']:.1%} "
+                      f"| avg P10-P90 width {m['width80_pct']:.1%} of spot")
             print(f"[backtest] {run['backtest']['warmup_origins']} early origins excluded so every engine is "
                   f"scored on the same dates (calibration warm-up"
                   f"{' and pre-DVOL history' if run['backtest']['dvol_used'] else ''})")

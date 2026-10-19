@@ -66,6 +66,7 @@ export function mockMonthlyForecast({ trackRecordRuns = 8 }: MonthlyForecastArgs
     h,
     origins: 385,
     independent: Math.floor((385 * 7) / h),
+    naiveMape: 0.02 * Math.sqrt(h),
     methods: (['fhs', 'fhs_dvol', 'fhs_cal', 'iid', 'garch_normal'] as const).map((method) => ({
       method,
       label: method,
@@ -74,6 +75,8 @@ export function mockMonthlyForecast({ trackRecordRuns = 8 }: MonthlyForecastArgs
       pit: Array.from({ length: 10 }, () => 30 + Math.floor(r() * 20)),
       upperMiss: 0.08 + r() * 0.05,
       lowerMiss: 0.06 + r() * 0.04,
+      mapeMedian: 0.02 * Math.sqrt(h),
+      width80Pct: 0.073 * Math.sqrt(h),
     })),
   }));
 
