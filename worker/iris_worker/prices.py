@@ -1,9 +1,20 @@
 """Daily BTC-USD closes.
 
-Primary source is Coinbase Exchange, paged backwards 300 candles at a time —
-the same trick ``src/lib/sources/coinbase.ts`` uses to reach ~2016. Kraken is the
-fallback (~720 days). A local CSV can be passed instead, for offline runs and
-for reproducing a paper figure from a frozen dataset.
+Sources, tried in order:
+
+1. Coinbase Exchange, paged backwards 300 candles at a time — the same trick
+   ``src/lib/sources/coinbase.ts`` uses to reach ~2016.
+2. Yahoo Finance chart API (``BTC-USD``, daily, history to 2014). Also what the
+   original IRIS datasets were built from (yfinance), and reachable from
+   networks that block crypto exchanges (several Indonesian ISPs block both
+   Coinbase and Kraken).
+3. Kraken (~720 days only — enough to run, thin for the backtest).
+
+A local CSV can be passed instead, for offline runs and for reproducing a paper
+figure from a frozen dataset.
+
+All three report daily candles closing at 00:00 UTC, the same instant as
+Deribit's daily DVOL close, which ``dvol.align`` relies on.
 
 Only *completed* UTC days are returned: today's candle is still forming and
 would put a partial close into the series.
@@ -64,6 +75,40 @@ def coinbase_daily(years: float = 11, product: str = "BTC-USD", session: request
     return _clean(rows, "coinbase")
 
 
+YAHOO_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+# Yahoo rejects obviously scripted user agents; a browser-like one is the documented workaround.
+YAHOO_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"}
+
+
+def parse_yahoo_chart(body: dict) -> dict[str, float]:
+    """``date -> close`` from a v8 chart response; null closes are skipped."""
+    err = (body.get("chart") or {}).get("error")
+    if err:
+        raise RuntimeError(f"yahoo: {err}")
+    res = body["chart"]["result"][0]
+    closes = res["indicators"]["quote"][0]["close"]
+    rows = {}
+    for ts, c in zip(res["timestamp"], closes):
+        if c is not None and c > 0:
+            rows[datetime.fromtimestamp(int(ts), timezone.utc).date().isoformat()] = float(c)
+    return rows
+
+
+def yahoo_daily(years: float = 11, symbol: str = "BTC-USD", session: requests.Session | None = None) -> Series:
+    s = session or requests.Session()
+    end = int(time.time())
+    start = end - int(years * 365.25 * DAY)
+    resp = s.get(YAHOO_URL.format(symbol=symbol),
+                 params={"period1": start, "period2": end, "interval": "1d", "events": "history"},
+                 headers=YAHOO_UA, timeout=30)
+    resp.raise_for_status()
+    rows = parse_yahoo_chart(resp.json())
+    if len(rows) < 400:
+        raise RuntimeError(f"yahoo returned only {len(rows)} daily closes")
+    return _clean(rows, "yahoo")
+
+
 def kraken_daily(pair: str = "XBTUSD", session: requests.Session | None = None) -> Series:
     s = session or requests.Session()
     resp = s.get("https://api.kraken.com/0/public/OHLC", params={"pair": pair, "interval": 1440},
@@ -97,7 +142,7 @@ def load_daily(csv_path: str | None = None) -> Series:
     if csv_path:
         return csv_daily(csv_path)
     errors = []
-    for fn in (coinbase_daily, kraken_daily):
+    for fn in (coinbase_daily, yahoo_daily, kraken_daily):
         try:
             return fn()
         except Exception as exc:  # noqa: BLE001 — try the next source, report all at the end

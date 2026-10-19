@@ -6,7 +6,7 @@ from iris_worker.backtest import conformal_k, run_backtest
 from iris_worker.fhs import recalibrate, simulate
 from iris_worker.garch import fit_garch11, forecast_sigma_path
 from iris_worker.monthly import build_run
-from iris_worker.prices import Series
+from iris_worker.prices import Series, parse_yahoo_chart
 from iris_worker.tracking import bucket, score_run
 
 
@@ -236,3 +236,13 @@ def test_build_run_uses_dvol_and_falls_back_without_it():
     stale = {d: v for d, v in _dvol_for(r, dates, start=200).items() if d < dates[-3]}
     fb = build_run(Series(dates, closes, "test"), 30, 2000, False, 0, 60, 12, dvol_by_date=stale)
     assert fb["method"] == "fhs" and fb["model"]["vol_source"] == "garch" and fb["model"]["dvol_pct"] is None
+
+
+def test_parse_yahoo_chart_skips_nulls_and_uses_utc_dates():
+    body = {"chart": {"error": None, "result": [{
+        "timestamp": [1755734400, 1755820800, 1755907200],      # 2025-08-21/22/23 00:00 UTC
+        "indicators": {"quote": [{"close": [113000.5, None, 115500.0]}]},
+    }]}}
+    assert parse_yahoo_chart(body) == {"2025-08-21": 113000.5, "2025-08-23": 115500.0}
+    with pytest.raises(RuntimeError):
+        parse_yahoo_chart({"chart": {"error": {"code": "Not Found"}, "result": None}})
